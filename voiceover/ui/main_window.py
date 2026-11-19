@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
             box.setSpacing(0)
             fig = QLabel("0")
             fig.setObjectName("figure")
-            fig.setFont(theme.display_font(theme.TEXT_XL, tabular=True))
+            fig.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
             cap = QLabel(caption)
             cap.setObjectName("label")
             box.addWidget(fig)

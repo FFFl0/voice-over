@@ -14,14 +14,15 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalett
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
-STAMP = """/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight (deal 1/3, seed desktop-studio-multi-voice-dubbing-78f8·c508889d·2026-11-19·r0) · redesign: full
- * nav: top bar, kept; tools grouped text, sound, review, one primary export · signature: the cue, the line being spoken set under the picture in the wide light cut, its lane lit on the timeline · states: empty (welcome, no lines, no take), busy (task bar), error (dialogs), full
- * axes: dark/grotesk-sans/cool · posture: committed · contrast: pass · v2.0.0 */
-/* Hallmark · swapped faces: Mona Sans has no Cyrillic and the interface is Russian; the expanded light display is Unbounded Light 300, the reading face Golos Text 400/500 (both OFL, both cut for Cyrillic) */
+STAMP = """/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight (by request, deal 1/3, seed desktop-studio-multi-voice-dubbing-78f8·c508889d·2026-11-19·r0) · redesign: restyle
+ * nav: kept · signature: kept, the cue under the picture with its lane lit on the timeline · states: empty (welcome, no lines, no take), busy (task bar), error (dialogs), full
+ * axes: dark/grotesk-sans/cool-neutral · posture: committed · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P2 H- E2 S2 R2 V2 · weakest: E, Qt has no outline or focus-visible, so focus is a 1px focus-colour edge on every control */
-/* Base face (Golos Text) is the application font, set in apply_theme; the timecode and figures get Unbounded with tabular figures in code, because a style-sheet font would drop the OpenType feature */
+/* Hallmark · user edits over the theme: the ground lifted from 14% to 22% lightness and its chroma cut to a slate, the ink warmed to paper-white, radius 4px on controls and 6px on surfaces (the theme's do-nots say square and cold; the user's words win) */
+/* Hallmark · faces: Manrope 300 for the timecode, figures and the cue, Manrope 400/500 for the interface (OFL, Cyrillic); the user turned down Unbounded and Golos Text, Mona Sans has no Cyrillic */
+/* Base face is the application font, set in apply_theme; the timecode and figures get tabular figures in code, because a style-sheet font would drop the OpenType feature */
 /* Hallmark · waive 26a · Qt style sheets have no outline property; focus shows as a border step in --focus, instantly */
-/* Hallmark · waive theme-light · the user's existing light/dark switch is wiring the redesign keeps; the day mode is Midnight's own hue at day lightness, square and single-accent */
+/* Hallmark · waive theme-light · the user's light/dark switch is kept; the day mode is warm paper with the same slate ink and one azure */
 """
 
 
@@ -44,9 +45,9 @@ class Theme:
     success: str
     warn: str
     shadow: str
-    on_role: str = "#02071d"   # текст на блоках цвета роли (тональные цвета светлые в обеих темах)
-    font_body: str = "Golos Text"
-    font_display: str = "Unbounded"
+    on_role: str = "#0d1623"   # текст на блоках цвета роли (тональные цвета светлые в обеих темах)
+    font_body: str = "Manrope"
+    font_display: str = "Manrope"   # тот же шрифт в начертании Light 300
 
     @property
     def dark(self) -> bool:
@@ -85,19 +86,19 @@ class Theme:
 
 MIDNIGHT = Theme(
     name="dark",
-    paper="#02071d", paper2="#071129", paper3="#0f1c37",
-    ink="#e7f0f9", ink2="#bddcf7", muted="#98a9c1",
-    rule="#1c2a48", rule2="#364868",
-    accent="#6bcbf7", accent2="#3483ad", accent_ink="#040c22", focus="#6bdaff",
-    error="#f47c70", success="#6fc884", warn="#e6b55d", shadow="#000007",
+    paper="#141b25", paper2="#1b232e", paper3="#252e3b",
+    ink="#f2eee7", ink2="#dfd6cb", muted="#9fa9b3",
+    rule="#303944", rule2="#4b5665",
+    accent="#73cbf0", accent2="#4189ad", accent_ink="#0d1623", focus="#77ddff",
+    error="#f38277", success="#79ca8b", warn="#e6b96b", shadow="#03060d", on_role="#0d1623",
 )
 MIDNIGHT_DAY = Theme(
     name="light",
-    paper="#f4f7fb", paper2="#e9edf4", paper3="#dce2eb",
-    ink="#0a152c", ink2="#223251", muted="#55647a",
-    rule="#d1d8e4", rule2="#a9b5c8",
-    accent="#006aa0", accent2="#3483ad", accent_ink="#f6fbff", focus="#007bb7",
-    error="#b02b27", success="#0f6a31", warn="#845000", shadow="#a9b5c8",
+    paper="#f8f6f3", paper2="#efece8", paper3="#e4e1db",
+    ink="#1a222e", ink2="#303b4a", muted="#5a616b",
+    rule="#dbd7d0", rule2="#b9b3aa",
+    accent="#006c98", accent2="#3a83a6", accent_ink="#fcfaf6", focus="#007bb2",
+    error="#b02b27", success="#0f6a31", warn="#845000", shadow="#b9b3aa", on_role="#0d1623",
 )
 THEMES = {"dark": MIDNIGHT, "light": MIDNIGHT_DAY}
 
@@ -116,6 +117,10 @@ TEXT_LG = 12.6
 TEXT_XL = 15.1
 TEXT_2XL = 18.1
 TEXT_3XL = 21.8
+
+# Скругления: небольшие, одно на уровень вложенности
+RADIUS_SM = 4   # кнопки, поля, блоки на таймлайне
+RADIUS_MD = 6   # поверхности: колодцы, карточки, меню
 
 _current: Theme = MIDNIGHT
 _fonts_loaded = False
@@ -150,7 +155,7 @@ def role_text(color: str, ground: str | None = None) -> str:
 
 
 def load_fonts() -> None:
-    """Подключить Unbounded и Golos Text (SIL OFL) из assets/fonts."""
+    """Подключить Manrope (SIL OFL) из assets/fonts."""
     global _fonts_loaded
     if _fonts_loaded:
         return
@@ -161,11 +166,11 @@ def load_fonts() -> None:
 
 
 def display_font(size_pt: float, tabular: bool = False) -> QFont:
-    """Широкий светлый срез Unbounded 300 — голос темы (заголовки, тайм-код, реплика)."""
+    """Manrope Light 300 — голос темы (заголовки, тайм-код, реплика)."""
     f = QFont(_current.font_display)
     f.setPointSizeF(size_pt)
     f.setWeight(QFont.Light)
-    f.setLetterSpacing(QFont.PercentageSpacing, 99)
+    f.setLetterSpacing(QFont.PercentageSpacing, 98.5)
     if tabular:
         _tnum(f)
     return f
@@ -195,13 +200,13 @@ def _qss(t: Theme) -> str:
 * {{ outline: 0; }}
 QWidget {{ color: {t.ink}; }}
 QMainWindow, QDialog, QStackedWidget, QSplitter {{ background: {t.paper}; }}
-QToolTip {{ background: {t.paper3}; color: {t.ink}; border: 0; padding: 6px 9px; }}
+QToolTip {{ background: {t.paper3}; color: {t.ink}; border: 0; padding: 6px 9px; border-radius: {RADIUS_SM}px; }}
 
 QMenuBar {{ background: {t.paper}; border-bottom: 1px solid {t.rule}; padding: 2px 6px; }}
-QMenuBar::item {{ padding: 6px 10px; background: transparent; color: {t.muted}; }}
+QMenuBar::item {{ padding: 6px 10px; background: transparent; color: {t.muted}; border-radius: {RADIUS_SM}px; }}
 QMenuBar::item:selected {{ background: {t.paper3}; color: {t.ink}; }}
-QMenu {{ background: {t.paper2}; border: 0; padding: 6px 0; }}
-QMenu::item {{ padding: 7px 28px 7px 14px; }}
+QMenu {{ background: {t.paper2}; border: 1px solid {t.rule}; border-radius: {RADIUS_MD}px; padding: 6px; }}
+QMenu::item {{ padding: 7px 28px 7px 10px; border-radius: {RADIUS_SM}px; }}
 QMenu::item:selected {{ background: {t.paper3}; }}
 QMenu::item:disabled {{ color: {t.muted}; }}
 QMenu::separator {{ height: 1px; background: {t.rule}; margin: 6px 0; }}
@@ -210,7 +215,7 @@ QMenu::indicator {{ width: 12px; height: 12px; margin-left: 8px; }}
 QToolBar {{ background: {t.paper}; border: 0; border-bottom: 1px solid {t.rule}; padding: 6px 10px;
            spacing: 2px; }}
 QToolBar::separator {{ width: 1px; background: {t.rule}; margin: 6px 10px; }}
-QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 0;
+QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: {RADIUS_SM}px;
               padding: 7px 10px; color: {t.ink}; }}
 QToolButton:hover {{ background: {t.paper3}; }}
 QToolButton:pressed, QToolButton:checked {{ background: {t.paper2}; }}
@@ -222,7 +227,7 @@ QToolButton#primaryAction:hover {{ background: {t.focus}; }}
 QToolButton#primaryAction:disabled {{ background: {t.paper3}; color: {t.muted}; }}
 QLabel#groupLabel {{ color: {t.muted}; font-size: {TEXT_SM}pt; padding: 0 2px 0 8px; }}
 
-QPushButton {{ background: transparent; border: 1px solid {t.rule2}; border-radius: 0;
+QPushButton {{ background: transparent; border: 1px solid {t.rule2}; border-radius: {RADIUS_SM}px;
               padding: 7px 14px; min-height: 18px; font-weight: 500; }}
 QPushButton:hover {{ background: {t.paper3}; }}
 QPushButton:pressed {{ background: {t.paper2}; }}
@@ -237,21 +242,22 @@ QPushButton[quiet="true"] {{ border-color: transparent; }}
 QPushButton[quiet="true"]:hover {{ background: {t.paper3}; }}
 
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background: {t.paper}; border: 1px solid {t.rule2}; border-radius: 0; padding: 6px 8px;
+    background: {t.paper}; border: 1px solid {t.rule2}; border-radius: {RADIUS_SM}px; padding: 6px 8px;
     selection-background-color: {t.accent2}; selection-color: {t.ink}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.focus}; }}
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled,
 QPlainTextEdit:disabled {{ color: {t.muted}; border-color: {t.rule}; }}
 QComboBox::drop-down {{ border: 0; width: 22px; }}
-QComboBox QAbstractItemView {{ background: {t.paper2}; border: 0; padding: 4px 0;
+QComboBox QAbstractItemView {{ background: {t.paper2}; border: 1px solid {t.rule}; border-radius: {RADIUS_SM}px; padding: 4px;
     selection-background-color: {t.paper3}; selection-color: {t.ink}; }}
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button,
 QDoubleSpinBox::down-button {{ width: 16px; border: 0; background: transparent; }}
 
-QTabWidget::pane {{ border: 0; background: {t.paper2}; }}
+QTabWidget::pane {{ border: 0; background: {t.paper2}; border-radius: {RADIUS_MD}px; border-top-left-radius: 0; }}
 QTabBar {{ background: {t.paper}; }}
 QTabBar::tab {{ background: {t.paper}; color: {t.muted}; padding: 10px 16px; margin: 0;
+               border-top-left-radius: {RADIUS_MD}px; border-top-right-radius: {RADIUS_MD}px;
                border: 0; border-bottom: 2px solid transparent; font-weight: 500; }}
 QTabBar::tab:hover {{ color: {t.ink}; }}
 QTabBar::tab:selected {{ color: {t.ink}; background: {t.paper2}; border-bottom: 2px solid {t.accent}; }}
@@ -263,6 +269,7 @@ QTableView::item {{ padding: 0 8px; border: 0; border-bottom: 1px solid {t.rule}
 QTableView::item:selected {{ background: {t.paper3}; color: {sel_text}; }}
 QTableView:focus, QListWidget:focus {{ border: 0; }}
 QListWidget::item {{ padding: 9px 10px; border-bottom: 1px solid {t.rule}; }}
+QListWidget#recent {{ border-radius: {RADIUS_MD}px; }}
 QListWidget::item:selected {{ background: {t.paper3}; color: {sel_text}; }}
 QListWidget::item:hover:!selected {{ background: {t.paper3}; }}
 QHeaderView {{ background: {t.paper2}; }}
@@ -276,14 +283,14 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 0; padding: 0; color: {t.mu
 
 QCheckBox, QRadioButton {{ spacing: 8px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 15px; height: 15px; border: 1px solid {t.rule2};
-    background: {t.paper}; border-radius: 0; }}
+    background: {t.paper}; border-radius: 3px; }}
 QCheckBox::indicator:checked {{ background: {t.ink}; border-color: {t.ink}; image: url({_check_svg(t)}); }}
 QRadioButton::indicator:checked {{ background: {t.ink}; border: 4px solid {t.paper}; }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover,
 QCheckBox::indicator:focus, QRadioButton::indicator:focus {{ border-color: {t.focus}; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {t.muted}; }}
 
-QProgressBar {{ background: {t.rule2}; border: 0; border-radius: 0; max-height: 2px; min-height: 2px;
+QProgressBar {{ background: {t.rule2}; border: 0; border-radius: 1px; max-height: 2px; min-height: 2px;
                text-align: center; color: transparent; }}
 QProgressBar::chunk {{ background: {t.accent}; }}
 QProgressBar#level {{ max-height: 4px; min-height: 4px; background: {t.rule}; }}
@@ -291,12 +298,12 @@ QProgressBar#level::chunk {{ background: {t.ink2}; }}
 
 QSlider::groove:horizontal {{ height: 2px; background: {t.rule2}; }}
 QSlider::sub-page:horizontal {{ background: {t.accent}; }}
-QSlider::handle:horizontal {{ background: {t.ink}; width: 10px; height: 10px; margin: -4px 0; border-radius: 0; }}
+QSlider::handle:horizontal {{ background: {t.ink}; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }}
 QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {t.focus}; }}
 
 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0; }}
-QScrollBar::handle {{ background: {t.rule2}; border-radius: 0; min-height: 30px; min-width: 30px; }}
+QScrollBar::handle {{ background: {t.rule2}; border-radius: 3px; min-height: 30px; min-width: 30px; }}
 QScrollBar::handle:hover {{ background: {t.muted}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
@@ -311,16 +318,16 @@ QStatusBar::item {{ border: 0; }}
 
 QLabel#muted {{ color: {t.muted}; }}
 QLabel#label {{ color: {t.muted}; font-weight: 500; font-size: {TEXT_SM}pt; }}
-QLabel#h1 {{ font-family: "{t.font_display}"; font-weight: 300; font-size: 26pt; }}
+QLabel#h1 {{ font-family: "{t.font_display}"; font-weight: 300; font-size: 30pt; }}
 QLabel#h2 {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_XL}pt; }}
 QLabel#itemTitle {{ font-weight: 500; font-size: {TEXT_LG}pt; }}
-QLabel#cueText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_XL}pt; color: {t.ink}; }}
+QLabel#cueText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_2XL}pt; color: {t.ink}; }}
 QLabel#cueWho {{ font-weight: 500; font-size: {TEXT_SM}pt; }}
-QLabel#promptText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_2XL}pt; padding: 18px 4px; }}
+QLabel#promptText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_3XL}pt; padding: 18px 4px; }}
 QLabel#countdown {{ font-weight: 500; font-size: {TEXT_LG}pt; }}
 QFrame#cue {{ background: {t.paper}; border-top: 1px solid {t.rule}; }}
-QFrame#well {{ background: {t.paper3}; }}
-QFrame#stepCard {{ background: {t.paper2}; }}
+QFrame#well {{ background: {t.paper3}; border-radius: {RADIUS_MD}px; }}
+QFrame#stepCard {{ background: {t.paper2}; border-radius: {RADIUS_MD}px; }}
 QWidget#videoArea {{ background: {t.paper}; }}
 QWidget#transport {{ background: {t.paper}; }}
 """
@@ -455,7 +462,7 @@ def app_icon() -> QIcon:
     """Значок: квадрат полночного синего, азурная звуковая волна над строкой реплики."""
     m = MIDNIGHT
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-           f'<rect width="64" height="64" fill="{m.paper}"/>'
+           f'<rect width="64" height="64" rx="10" fill="{m.paper}"/>'
            f'<g stroke="{m.accent}" stroke-width="4" stroke-linecap="square">'
            f'<path d="M14 26v8M22 18v24M30 12v36M38 20v20M46 24v12"/></g>'
            f'<path d="M14 54h36" stroke="{m.ink}" stroke-width="3"/></svg>')

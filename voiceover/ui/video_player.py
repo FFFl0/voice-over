@@ -47,7 +47,7 @@ class VideoPlayer(QWidget):
         # Тайм-код — фигура в широком светлом срезе, длительность рядом обычной шириной
         self.time_lbl = QLabel("00:00.000")
         self.time_lbl.setObjectName("timecode")
-        self.time_lbl.setFont(theme.display_font(theme.TEXT_XL, tabular=True))
+        self.time_lbl.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
         self.time_lbl.setMinimumWidth(150)
         self.dur_lbl = QLabel("из 00:00.000")
         self.dur_lbl.setObjectName("muted")
@@ -100,7 +100,7 @@ class VideoPlayer(QWidget):
         self.btn_fwd.setIcon(theme.icon("fwd"))
         self.btn_play.setIcon(theme.icon("pause" if self.is_playing() else "play"))
         self.btn_play.setIconSize(QSize(24, 24))
-        self.time_lbl.setFont(theme.display_font(theme.TEXT_XL, tabular=True))
+        self.time_lbl.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
         self.vol_icon.setPixmap(theme.icon("volume", theme.current().muted).pixmap(18, 18))
 
     # ------------------------------------------------------------ API

@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 full = os.environ.get("VO_FULL") == "1"
 datas = collect_data_files("imageio_ffmpeg", include_py_files=False)
 datas += collect_data_files("faster_whisper")      # VAD-модель
-datas += [("voiceover/assets", "voiceover/assets")]  # шрифты Unbounded и Golos Text (OFL) и значок
+datas += [("voiceover/assets", "voiceover/assets")]  # шрифт Manrope (OFL) и значок
 hidden = collect_submodules("edge_tts") + collect_submodules("faster_whisper")
 excludes = ["tkinter", "matplotlib", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
             "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf", "onnxruntime.training"]

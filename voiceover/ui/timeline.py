@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QScrollBar, QVBoxLayout, QWidget
 
 from ..core.models import LineSource, Project, line_status
@@ -16,6 +16,7 @@ RULER_H = 26
 WAVE_H = 48
 LANE_H = 30
 LABEL_W = 150
+BLOCK_RADIUS = 3   # небольшое скругление блоков реплик
 EDGE_PX = 6
 
 
@@ -128,7 +129,7 @@ class TimelineCanvas(QWidget):
     def paintEvent(self, _):
         th = theme.current()
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, False)   # квадратная резка, без размытых краёв
+        p.setRenderHint(QPainter.Antialiasing, False)   # сетка и волна чёткими пикселями
         w, h = self.width(), self.height()
         lanes = self.lanes()
         end_t = self.t_of(w)
@@ -190,25 +191,31 @@ class TimelineCanvas(QWidget):
                 # Квадратный блок цвета роли. Готовая реплика — сплошная заливка,
                 # реплика без актуального звука — только контур со штриховкой.
                 ready = st in ("ok", "rec")
+                path = QPainterPath()
+                path.addRoundedRect(r, BLOCK_RADIUS, BLOCK_RADIUS)
+                p.setRenderHint(QPainter.Antialiasing, True)
                 fill = QColor(col)
                 fill.setAlpha(255 if (sel or hover) else 215)
                 if not ln.enabled:
                     fill.setAlpha(40)
                 p.setPen(Qt.NoPen)
                 if ready or not ln.enabled:
-                    p.fillRect(r, fill)
+                    p.fillPath(path, fill)
                 else:
                     ghost = QColor(col)
                     ghost.setAlpha(60 if not (sel or hover) else 95)
-                    p.fillRect(r, ghost)
-                    p.fillRect(r, QBrush(QColor(col), Qt.BDiagPattern))
+                    p.fillPath(path, ghost)
+                    p.fillPath(path, QBrush(QColor(col), Qt.BDiagPattern))
                     p.setPen(QPen(col, 1))
                     p.setBrush(Qt.NoBrush)
-                    p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))
+                    p.drawPath(path)
                 if sel:
+                    inner = QPainterPath()
+                    inner.addRoundedRect(r.adjusted(1, 1, -1, -1), BLOCK_RADIUS - 1, BLOCK_RADIUS - 1)
                     p.setPen(QPen(QColor(th.ink), 2))
                     p.setBrush(Qt.NoBrush)
-                    p.drawRect(r.adjusted(1, 1, -1, -1))
+                    p.drawPath(inner)
+                p.setRenderHint(QPainter.Antialiasing, False)
                 if r.width() > 34:
                     p.setPen(QColor(th.on_role) if (ready and ln.enabled) else QColor(th.ink))
                     p.drawText(r.adjusted(8, 0, -6, 0), Qt.AlignVCenter | Qt.AlignLeft,

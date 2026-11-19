@@ -71,6 +71,7 @@ class WelcomePage(QWidget):
         self.recent_title.setObjectName("label")
         self.recent = QListWidget()
         self.recent.setWordWrap(True)
+        self.recent.setObjectName("recent")
         self.recent.setMinimumHeight(150)
         self.recent.itemActivated.connect(lambda it: self.recentRequested.emit(it.data(Qt.UserRole)))
         self.recent.itemClicked.connect(lambda it: self.recentRequested.emit(it.data(Qt.UserRole)))
