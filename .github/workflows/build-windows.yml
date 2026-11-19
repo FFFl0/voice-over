@@ -1,0 +1,36 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libportaudio2
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pyinstaller --noconfirm voiceover.spec
+        env:
+          VO_FULL: "0"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceOverStudio-windows
+          path: dist/VoiceOverStudio
