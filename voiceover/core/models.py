@@ -232,6 +232,23 @@ class Project:
             lines=[Line.from_dict(x) for x in d.get("lines", [])],
         )
 
+    # ---------- отмена/повтор ----------
+    def snapshot(self) -> dict:
+        """Редактируемое пользователем состояние (без путей к служебным файлам)."""
+        return {
+            "mix": self.mix.to_dict(),
+            "characters": [c.to_dict() for c in self.characters],
+            "lines": [ln.to_dict() for ln in self.lines],
+        }
+
+    def restore(self, state: dict) -> None:
+        """Восстановить состояние на месте (объект проекта остаётся тем же)."""
+        new_mix = MixSettings.from_dict(state["mix"])
+        for k in MixSettings.__dataclass_fields__:
+            setattr(self.mix, k, getattr(new_mix, k))
+        self.characters = [Character.from_dict(c) for c in state["characters"]]
+        self.lines = [Line.from_dict(x) for x in state["lines"]]
+
     def save(self, path: Optional[str] = None) -> None:
         if path:
             self.path = str(path)

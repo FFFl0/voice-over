@@ -21,9 +21,12 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("VoiceOverStudio")
-    app.setStyle("Fusion")
+    from .ui import theme
 
-    win = MainWindow(AppSettings.load())
+    settings = AppSettings.load()
+    theme.apply_theme(app, settings.theme)
+    app.setWindowIcon(theme.app_icon())
+    win = MainWindow(settings)
     win.show()
     # Открыть проект/видео, переданный в командной строке (или перетащенный на .exe)
     if len(argv) > 1:

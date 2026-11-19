@@ -13,13 +13,23 @@ from PySide6.QtWidgets import (QColorDialog, QComboBox, QDoubleSpinBox, QFormLay
 
 from ..core.models import Character, Engine, LineSource, Project
 from ..tts import get_engine, list_engines
+from . import theme
 
 PREVIEW_TEXT = "Привет! Так звучит мой голос в этой озвучке."
 
 
 def color_icon(color: str) -> QIcon:
-    pm = QPixmap(14, 14)
-    pm.fill(QColor(color))
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtGui import QPainter
+    pm = QPixmap(28, 28)
+    pm.fill(_Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(_Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(4, 4, 20, 20)
+    p.end()
+    pm.setDevicePixelRatio(2)
     return QIcon(pm)
 
 
@@ -35,12 +45,12 @@ class CharactersPanel(QWidget):
         self._loading = False
 
         self.list = QListWidget()
-        self.list.setMinimumHeight(120)
-        btn_add = QPushButton("Добавить")
-        btn_del = QPushButton("Удалить")
-        btn_merge = QPushButton("Объединить…")
+        self.list.setMinimumHeight(150)
+        btn_add = QPushButton(theme.icon("plus"), " Добавить")
+        btn_del = QPushButton(theme.icon("trash"), " Удалить")
+        btn_merge = QPushButton(theme.icon("users"), " Объединить…")
         btn_merge.setToolTip("Перенести все реплики выбранного персонажа в другого и удалить его")
-        btn_auto = QPushButton("Раздать голоса")
+        btn_auto = QPushButton(theme.icon("synth"), " Раздать голоса")
         btn_auto.setToolTip("Автоматически назначить разные голоса всем персонажам")
         top = QHBoxLayout()
         for b in (btn_add, btn_del, btn_merge, btn_auto):
@@ -50,7 +60,7 @@ class CharactersPanel(QWidget):
         f = QFormLayout(self.box)
         self.name = QLineEdit()
         self.color_btn = QPushButton()
-        self.color_btn.setFixedWidth(60)
+        self.color_btn.setFixedSize(60, 24)
         self.source = QComboBox()
         self.source.addItem("Синтез речи (AI)", LineSource.TTS.value)
         self.source.addItem("Живая запись (актёр)", LineSource.RECORDING.value)
@@ -78,8 +88,9 @@ class CharactersPanel(QWidget):
         self.volume.setSingleStep(0.5)
         self.volume.setSuffix(" дБ")
         self.preview_text = QLineEdit(PREVIEW_TEXT)
-        self.btn_preview = QPushButton("▶ Прослушать голос")
-        self.btn_lines = QPushButton("Показать реплики")
+        self.btn_preview = QPushButton(theme.icon("play", "#ffffff"), " Прослушать голос")
+        self.btn_preview.setProperty("primary", True)
+        self.btn_lines = QPushButton(theme.icon("list"), " Показать реплики")
         self.count_lbl = QLabel()
 
         f.addRow("Имя:", self.name)
@@ -99,6 +110,8 @@ class CharactersPanel(QWidget):
         f.addRow(self.count_lbl)
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(10)
         lay.addLayout(top)
         lay.addWidget(self.list, 1)
         lay.addWidget(self.box)
@@ -137,8 +150,11 @@ class CharactersPanel(QWidget):
                 if ln.character_id:
                     counts[ln.character_id] = counts.get(ln.character_id, 0) + 1
             for c in self.project.characters:
-                kind = "🎙" if c.source == LineSource.RECORDING else "🤖"
-                it = QListWidgetItem(color_icon(c.color), f"{kind} {c.name}  ({counts.get(c.id, 0)})")
+                kind = "живая запись" if c.source == LineSource.RECORDING else c.engine.value.capitalize()
+                if c.source == LineSource.RECORDING and c.actor:
+                    kind += f" · {c.actor}"
+                it = QListWidgetItem(color_icon(c.color),
+                                     f"{c.name}   ·  {counts.get(c.id, 0)} реплик  ·  {kind}")
                 it.setData(Qt.UserRole, c.id)
                 self.list.addItem(it)
         self.list.blockSignals(False)
@@ -185,7 +201,7 @@ class CharactersPanel(QWidget):
             return
         self._loading = True
         self.name.setText(c.name)
-        self.color_btn.setStyleSheet(f"background:{c.color}")
+        self.color_btn.setStyleSheet(f"background:{c.color}; border-radius:6px; border:none")
         self.source.setCurrentIndex(self.source.findData(c.source.value))
         self.actor.setText(c.actor)
         self.engine.setCurrentIndex(max(0, self.engine.findData(c.engine.value)))
@@ -247,7 +263,7 @@ class CharactersPanel(QWidget):
         col = QColorDialog.getColor(QColor(c.color), self, "Цвет персонажа")
         if col.isValid():
             c.color = col.name()
-            self.color_btn.setStyleSheet(f"background:{c.color}")
+            self.color_btn.setStyleSheet(f"background:{c.color}; border-radius:6px; border:none")
             self.reload(c.id)
             self.listChanged.emit()
 

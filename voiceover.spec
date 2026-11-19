@@ -5,9 +5,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 full = os.environ.get("VO_FULL") == "1"
 datas = collect_data_files("imageio_ffmpeg", include_py_files=False)
-hidden = collect_submodules("edge_tts")
+datas += collect_data_files("faster_whisper")      # VAD-модель
+hidden = collect_submodules("edge_tts") + collect_submodules("faster_whisper")
 excludes = ["tkinter", "matplotlib", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
-            "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf"]
+            "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf", "onnxruntime.training"]
 if full:
     hidden += collect_submodules("demucs")
     datas += collect_data_files("demucs")
@@ -18,5 +19,5 @@ a = Analysis(["run.py"], pathex=["."], datas=datas, hiddenimports=hidden,
              excludes=excludes, noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="VoiceOverStudio",
-          console=False, upx=False)
+          console=False, upx=False, icon="voiceover/assets/icon.ico")
 coll = COLLECT(exe, a.binaries, a.datas, name="VoiceOverStudio", upx=False)

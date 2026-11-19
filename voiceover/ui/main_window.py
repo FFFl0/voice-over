@@ -6,30 +6,36 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QItemSelectionModel, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, QItemSelectionModel, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog,
-                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
-                               QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-                               QSplitter, QStyle, QTableView, QTabWidget, QTextEdit,
-                               QToolButton, QVBoxLayout, QWidget, QDialog,
-                               QDialogButtonBox, QAbstractSpinBox)
+from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication, QComboBox,
+                               QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
+                               QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
+                               QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
+                               QSplitter, QStackedWidget, QTableView, QTabWidget, QTextEdit,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
 from ..core import ffmpeg, mixer
 from ..core.models import Line, LineSource, MixMode, PROJECT_EXT, Project, line_status
 from ..core.separation import demucs_available, separate_vocals
-from ..core.settings import AppSettings
+from ..core.settings import AppSettings, data_dir
 from ..core.subtitles import fmt_clock, write_srt
 from ..core.synth import SynthResult, lines_needing_synth, preview_text, synthesize_lines
+from ..core.transcribe import transcribe, whisper_available
+from ..core.undo import UndoHistory
+from ..core.waveform import PEAKS_PER_SEC, compute_peaks
+from . import theme
 from .characters_panel import CharactersPanel, auto_assign_voice
 from .dialogs import (SUB_FILTER, VIDEO_FILTER, ExportDialog, ImportSubsDialog, MixPanel,
-                      NewProjectDialog, SettingsDialog)
-from .lines_table import C_CHAR, C_TEXT, CharacterDelegate, LinesFilter, LinesModel
+                      NewProjectDialog, SettingsDialog, TranscribeDialog)
+from .lines_table import (C_CHAR, C_STATUS, C_TEXT, LinesFilter, LinesModel, RoleDelegate,
+                          StatusDelegate)
 from .record_panel import RecordPanel
 from .timeline import Timeline
 from .video_player import VideoPlayer
+from .welcome import WelcomePage
 from .workers import Task, pool
 
 PROJECT_FILTER = f"Проект озвучки (*{PROJECT_EXT})"
@@ -43,14 +49,19 @@ class MainWindow(QMainWindow):
         self.project: Optional[Project] = None
         self.dirty = False
         self.task: Optional[Task] = None
-        self._preview_range: Optional[tuple[float, float]] = None
+        self.history = UndoHistory()
+        self._pending_label = ""
+        self._restoring = False
 
-        self.resize(1500, 900)
+        self.setWindowIcon(theme.app_icon())
+        self.resize(1560, 940)
         self._build_ui()
         self._build_actions()
+        self._apply_icons()
         self._update_title()
         self._update_actions()
 
+        self.commit_timer = QTimer(self, singleShot=True, interval=600, timeout=self._commit)
         self.autosave = QTimer(self, interval=120_000, timeout=self._autosave)
         self.autosave.start()
         QApplication.instance().installEventFilter(self)
@@ -65,6 +76,24 @@ class MainWindow(QMainWindow):
         self.clip_audio = QAudioOutput(self)
         self.clip_player.setAudioOutput(self.clip_audio)
 
+        # Строка «сейчас звучит» под видео
+        self.now_bar = QFrame()
+        self.now_bar.setObjectName("nowLine")
+        self.now_lbl = QLabel()
+        self.now_lbl.setWordWrap(True)
+        self.now_lbl.setMinimumHeight(44)
+        self.now_lbl.setAlignment(Qt.AlignCenter)
+        self.now_lbl.setStyleSheet("font-size:12.5pt")
+        nl = QVBoxLayout(self.now_bar)
+        nl.setContentsMargins(12, 6, 12, 6)
+        nl.addWidget(self.now_lbl)
+        left = QWidget()
+        ll0 = QVBoxLayout(left)
+        ll0.setContentsMargins(0, 0, 0, 0)
+        ll0.setSpacing(0)
+        ll0.addWidget(self.player, 1)
+        ll0.addWidget(self.now_bar)
+
         # ---- вкладка «Реплики»
         self.lines_model = LinesModel(self)
         self.lines_filter = LinesFilter(self)
@@ -75,22 +104,26 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
                                    | QAbstractItemView.AnyKeyPressed)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(24)
-        self.table.setItemDelegateForColumn(C_CHAR, CharacterDelegate(self.lines_model, self))
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.setItemDelegateForColumn(C_CHAR, RoleDelegate(self.lines_model, self))
+        self.table.setItemDelegateForColumn(C_STATUS, StatusDelegate(self))
         self.table.setWordWrap(False)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(C_TEXT, QHeaderView.Stretch)
-        for col, w in ((0, 50), (1, 85), (2, 85), (3, 120), (5, 95)):
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        for col, w in ((0, 56), (1, 92), (2, 92), (3, 130), (5, 112)):
             self.table.setColumnWidth(col, w)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Поиск по тексту…")
         self.search.setClearButtonEnabled(True)
         self.f_char = QComboBox()
-        self.f_char.setMinimumWidth(140)
+        self.f_char.setMinimumWidth(150)
         self.f_status = QComboBox()
         for label, key in (("Все статусы", "*"), ("Нет звука", "none"), ("Устарели", "stale"),
                            ("Синтез готов", "ok"), ("Записаны", "rec"), ("Без роли", "nochar"),
@@ -103,35 +136,44 @@ class MainWindow(QMainWindow):
 
         self.assign = QComboBox()
         self.assign.setToolTip("Назначить роль выделенным репликам")
-        b_add = QPushButton("+ Реплика")
-        b_add.setToolTip("Добавить реплику в позиции курсора (N)")
-        b_del = QPushButton("Удалить")
-        b_play = QPushButton("▶ Звук реплики")
-        b_play.setToolTip("Прослушать синтез/запись выделенной реплики (P)")
-        b_synth = QPushButton("Синтезировать выделенные")
-        b_add.clicked.connect(self.add_line)
-        b_del.clicked.connect(self.delete_lines)
-        b_play.clicked.connect(self.play_selected_clip)
-        b_synth.clicked.connect(lambda: self.synthesize(selected=True, force=True))
+        self.assign.setMinimumWidth(150)
+        self.b_add = QPushButton(" Реплика")
+        self.b_add.setToolTip("Добавить реплику в позиции курсора (N)")
+        self.b_del = QPushButton("")
+        self.b_del.setToolTip("Удалить выделенные реплики (Del)")
+        self.b_play = QPushButton(" Слушать")
+        self.b_play.setToolTip("Прослушать синтез/запись выделенной реплики (P)")
+        self.b_synth = QPushButton(" Синтез")
+        self.b_synth.setToolTip("Синтезировать выделенные реплики (Ctrl+Enter)")
+        self.b_synth.setProperty("primary", True)
+        self.b_add.clicked.connect(self.add_line)
+        self.b_del.clicked.connect(self.delete_lines)
+        self.b_play.clicked.connect(self.play_selected_clip)
+        self.b_synth.clicked.connect(lambda: self.synthesize(selected=True, force=True))
         acts = QHBoxLayout()
-        acts.addWidget(b_add)
-        acts.addWidget(b_del)
-        acts.addWidget(QLabel("Роль:"))
+        acts.addWidget(self.b_add)
+        acts.addWidget(self.b_del)
+        acts.addSpacing(8)
+        role_lbl = QLabel("Роль:")
+        role_lbl.setObjectName("muted")
+        acts.addWidget(role_lbl)
         acts.addWidget(self.assign, 1)
-        acts.addWidget(b_play)
-        acts.addWidget(b_synth)
+        acts.addSpacing(8)
+        acts.addWidget(self.b_play)
+        acts.addWidget(self.b_synth)
 
         self.text_edit = QPlainTextEdit()
-        self.text_edit.setPlaceholderText("Текст выделенной реплики (можно редактировать)")
-        self.text_edit.setMaximumHeight(70)
+        self.text_edit.setPlaceholderText("Текст выделенной реплики")
+        self.text_edit.setMaximumHeight(72)
         self.note_edit = QLineEdit()
-        self.note_edit.setPlaceholderText("Заметка для актёра (интонация, ударение…)")
+        self.note_edit.setPlaceholderText("Заметка для актёра: интонация, ударение…")
         self.stats = QLabel()
-        self.stats.setStyleSheet("color:gray")
+        self.stats.setObjectName("muted")
 
         lines_tab = QWidget()
         ll = QVBoxLayout(lines_tab)
-        ll.setContentsMargins(4, 4, 4, 4)
+        ll.setContentsMargins(12, 12, 12, 10)
+        ll.setSpacing(8)
         ll.addLayout(filt)
         ll.addWidget(self.table, 1)
         ll.addWidget(self.text_edit)
@@ -143,35 +185,48 @@ class MainWindow(QMainWindow):
         self.chars = CharactersPanel()
         self.record = RecordPanel(self.player, self.settings)
         self.mix_panel = MixPanel()
-        self.mix_panel.on_change = self._on_mix_changed
+        self.mix_panel.on_change = lambda: self.mark_dirty("Настройки сведения")
 
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(False)
+        self.tabs.setIconSize(QSize(18, 18))
         self.tabs.addTab(lines_tab, "Реплики")
         self.tabs.addTab(self.chars, "Персонажи")
         self.tabs.addTab(self.record, "Запись")
         mix_wrap = QWidget()
         mw = QVBoxLayout(mix_wrap)
+        mw.setContentsMargins(12, 12, 12, 12)
         mw.addWidget(self.mix_panel)
         mw.addStretch(1)
         self.tabs.addTab(mix_wrap, "Сведение")
 
         top = QSplitter(Qt.Horizontal)
-        top.addWidget(self.player)
+        top.addWidget(left)
         top.addWidget(self.tabs)
         top.setStretchFactor(0, 3)
         top.setStretchFactor(1, 2)
-        top.setSizes([850, 650])
-        main = QSplitter(Qt.Vertical)
-        main.addWidget(top)
-        main.addWidget(self.timeline)
-        main.setStretchFactor(0, 4)
-        main.setStretchFactor(1, 1)
-        main.setSizes([650, 220])
-        self.setCentralWidget(main)
+        top.setSizes([860, 680])
+        editor = QSplitter(Qt.Vertical)
+        editor.addWidget(top)
+        editor.addWidget(self.timeline)
+        editor.setStretchFactor(0, 4)
+        editor.setStretchFactor(1, 1)
+        editor.setSizes([640, 240])
+        editor.setContentsMargins(6, 6, 6, 0)
+
+        self.welcome = WelcomePage()
+        self.welcome.newRequested.connect(self.new_project)
+        self.welcome.openRequested.connect(self.open_project_dialog)
+        self.welcome.recentRequested.connect(lambda p: self.open_project(p))
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.welcome)
+        self.stack.addWidget(editor)
+        self.setCentralWidget(self.stack)
 
         # ---- строка состояния
         self.progress = QProgressBar()
-        self.progress.setMaximumWidth(260)
+        self.progress.setMaximumWidth(240)
+        self.progress.setFixedHeight(8)
         self.progress.setRange(0, 1000)
         self.progress.hide()
         self.progress_lbl = QLabel()
@@ -185,14 +240,14 @@ class MainWindow(QMainWindow):
 
         # ---- сигналы
         self.player.positionChanged.connect(self.timeline.canvas.set_playhead)
+        self.player.positionChanged.connect(self._update_now_line)
         self.player.durationChanged.connect(self.timeline.set_duration)
         self.timeline.canvas.seekRequested.connect(self.player.seek)
         self.timeline.canvas.lineSelected.connect(self._select_line_from_timeline)
         self.timeline.canvas.lineActivated.connect(self._play_line_video)
-        self.timeline.canvas.lineEdited.connect(self._on_line_edited)
+        self.timeline.canvas.lineEdited.connect(lambda i: self._on_line_edited(i, "Изменение тайминга"))
         self.table.selectionModel().selectionChanged.connect(self._on_table_selection)
-        self.table.doubleClicked.connect(self._on_table_double)
-        self.lines_model.edited.connect(self._on_line_edited)
+        self.lines_model.edited.connect(lambda i: self._on_line_edited(i, "Правка реплики"))
         self.search.textChanged.connect(self._apply_filter)
         self.f_char.currentIndexChanged.connect(self._apply_filter)
         self.f_status.currentIndexChanged.connect(self._apply_filter)
@@ -203,57 +258,65 @@ class MainWindow(QMainWindow):
         self.chars.listChanged.connect(self._on_chars_list_changed)
         self.chars.previewRequested.connect(self.preview_voice)
         self.chars.filterRequested.connect(self._filter_character)
-        self.record.recorded.connect(self._on_line_edited)
+        self.record.recorded.connect(lambda i: self._on_line_edited(i, "Запись реплики"))
         self.record.requestLine.connect(self._step_line)
         self.record.playTake.connect(self._play_take)
 
     def _build_actions(self):
-        st = self.style()
         mb = self.menuBar()
 
         def act(text, slot, shortcut=None, icon=None, tip=None) -> QAction:
             a = QAction(text, self)
-            if icon is not None:
-                a.setIcon(st.standardIcon(icon))
+            a.setProperty("iconName", icon)
             if shortcut:
                 a.setShortcut(QKeySequence(shortcut))
             if tip:
-                a.setToolTip(tip)
+                a.setToolTip(tip + (f" ({shortcut})" if shortcut else ""))
                 a.setStatusTip(tip)
             a.triggered.connect(slot)
             return a
 
-        self.a_new = act("Новый проект…", self.new_project, "Ctrl+N", QStyle.SP_FileIcon)
-        self.a_open = act("Открыть проект…", self.open_project_dialog, "Ctrl+O", QStyle.SP_DialogOpenButton)
-        self.a_save = act("Сохранить", self.save_project, "Ctrl+S", QStyle.SP_DialogSaveButton)
+        self.a_new = act("Новый проект…", self.new_project, "Ctrl+N", "new")
+        self.a_open = act("Открыть проект…", self.open_project_dialog, "Ctrl+O", "open")
+        self.a_save = act("Сохранить", self.save_project, "Ctrl+S", "save")
         self.a_save_as = act("Сохранить как…", self.save_project_as, "Ctrl+Shift+S")
-        self.a_import = act("Импорт субтитров…", self.import_subtitles, "Ctrl+I",
-                            QStyle.SP_FileDialogDetailedView, "Загрузить реплики из SRT/ASS/VTT")
+        self.a_close = act("Закрыть проект", self.close_project, "Ctrl+W")
+        self.a_import = act("Субтитры", self.import_subtitles, "Ctrl+I", "subs",
+                            "Импорт реплик из SRT/ASS/VTT")
+        self.a_whisper = act("Распознать", self.run_whisper, "Ctrl+R", "whisper",
+                             "Распознать речь в фильме (Whisper) и создать реплики")
         self.a_export_srt = act("Экспорт сценария (SRT с ролями)…", self.export_script)
-        self.a_export = act("Экспорт видео/звука…", self.export, "Ctrl+E", QStyle.SP_DialogApplyButton,
+        self.a_export = act("Экспорт", self.export, "Ctrl+E", "export",
                             "Свести озвучку и сохранить видео с новой дорожкой")
-        self.a_settings = act("Настройки…", self.open_settings)
+        self.a_settings = act("Настройки…", self.open_settings, None, "settings")
+        self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
         self.a_quit = act("Выход", self.close, "Ctrl+Q")
-        self.a_separate = act("Отделить голоса (для дубляжа)", self.separate, None,
-                              QStyle.SP_MediaVolumeMuted,
+        self.a_undo = act("Отменить", self.undo, QKeySequence.Undo, "undo")
+        self.a_redo = act("Повторить", self.redo, "Ctrl+Y", "redo")
+        self.a_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.a_separate = act("Отделить голоса", self.separate, None, "separate",
                               "Убрать оригинальные голоса, оставив музыку и звуки (Demucs)")
-        self.a_synth_all = act("Синтезировать все реплики", lambda: self.synthesize(False), "F5",
-                               QStyle.SP_BrowserReload, "Озвучить AI-голосами все реплики без звука")
+        self.a_synth_all = act("Синтез", lambda: self.synthesize(False), "F5", "synth",
+                               "Озвучить AI-голосами все реплики без звука")
         self.a_synth_sel = act("Синтезировать выделенные", lambda: self.synthesize(True, True),
                                "Ctrl+Return")
-        self.a_preview = act("Превью: 1 мин от курсора", lambda: self.build_preview(60), "F6",
-                             QStyle.SP_MediaPlay, "Свести фрагмент и слушать озвучку вместе с видео")
-        self.a_preview_full = act("Превью: весь фильм", lambda: self.build_preview(None), "Shift+F6")
+        self.a_preview = act("Превью", lambda: self.build_preview(60), "F6", "preview",
+                             "Свести минуту от курсора и слушать вместе с видео")
+        self.a_preview_full = act("Превью всего фильма", lambda: self.build_preview(None), "Shift+F6")
         self.a_auto_voices = act("Раздать голоса персонажам", self.chars.auto_voices)
         self.a_about = act("О программе", self.about)
-        self.a_help = act("Как пользоваться", self.help, "F1")
+        self.a_help = act("Как пользоваться", self.help, "F1", "help")
+        self.a_zoom_in = act("Увеличить таймлайн", lambda: self.timeline.canvas.zoom(1.25), "Ctrl+=")
+        self.a_zoom_out = act("Уменьшить таймлайн", lambda: self.timeline.canvas.zoom(0.8), "Ctrl+-")
+        self.a_theme = act("Сменить тему", self.toggle_theme, "Ctrl+T", "moon",
+                           "Тёмная / светлая тема")
 
         m = mb.addMenu("&Файл")
         for a in (self.a_new, self.a_open):
             m.addAction(a)
         self.recent_menu = m.addMenu("Недавние проекты")
         m.addSeparator()
-        for a in (self.a_save, self.a_save_as):
+        for a in (self.a_save, self.a_save_as, self.a_close):
             m.addAction(a)
         m.addSeparator()
         for a in (self.a_import, self.a_export_srt, self.a_export):
@@ -261,12 +324,35 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_settings)
         m.addAction(self.a_quit)
+
+        m = mb.addMenu("&Правка")
+        m.addAction(self.a_undo)
+        m.addAction(self.a_redo)
+        m.addSeparator()
+        m.addAction(self.a_cleanup)
+
         m = mb.addMenu("&Обработка")
-        for a in (self.a_separate, self.a_auto_voices, self.a_synth_all, self.a_synth_sel):
+        for a in (self.a_whisper, self.a_separate, self.a_auto_voices, self.a_synth_all,
+                  self.a_synth_sel):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_preview)
         m.addAction(self.a_preview_full)
+
+        m = mb.addMenu("&Вид")
+        grp = QActionGroup(self)
+        self.theme_actions = {}
+        for key, title in (("dark", "Тёмная тема"), ("light", "Светлая тема")):
+            a = QAction(title, self, checkable=True)
+            a.setChecked(self.settings.theme == key)
+            a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
+            grp.addAction(a)
+            m.addAction(a)
+            self.theme_actions[key] = a
+        m.addSeparator()
+        m.addAction(self.a_zoom_in)
+        m.addAction(self.a_zoom_out)
+
         m = mb.addMenu("&Справка")
         m.addAction(self.a_help)
         m.addAction(self.a_about)
@@ -274,12 +360,62 @@ class MainWindow(QMainWindow):
 
         tb = self.addToolBar("Основное")
         tb.setObjectName("main_toolbar")
+        tb.setMovable(False)
+        tb.setIconSize(QSize(20, 20))
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         for a in (self.a_new, self.a_open, self.a_save):
             tb.addAction(a)
+            tb.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonIconOnly)
         tb.addSeparator()
-        for a in (self.a_import, self.a_separate, self.a_synth_all, self.a_preview, self.a_export):
+        for a in (self.a_undo, self.a_redo):
             tb.addAction(a)
+            tb.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonIconOnly)
+        tb.addSeparator()
+        for a in (self.a_import, self.a_whisper, self.a_separate, self.a_synth_all, self.a_preview):
+            tb.addAction(a)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)
+        tb.addAction(self.a_theme)
+        tb.widgetForAction(self.a_theme).setToolButtonStyle(Qt.ToolButtonIconOnly)
+        tb.addAction(self.a_export)
+        tb.widgetForAction(self.a_export).setObjectName("primaryAction")
+        self.toolbar = tb
+
+    def _apply_icons(self):
+        th = theme.current()
+        for a in self.findChildren(QAction):
+            name = a.property("iconName")
+            if name:
+                color = th.accent_text if a is self.a_export else None
+                a.setIcon(theme.icon(name, color))
+        self.a_theme.setIcon(theme.icon("sun" if th.dark else "moon"))
+        self.b_add.setIcon(theme.icon("plus"))
+        self.b_del.setIcon(theme.icon("trash"))
+        self.b_play.setIcon(theme.icon("headphones"))
+        self.b_synth.setIcon(theme.icon("synth", th.accent_text))
+        self.tabs.setTabIcon(0, theme.icon("list"))
+        self.tabs.setTabIcon(1, theme.icon("users"))
+        self.tabs.setTabIcon(2, theme.icon("mic"))
+        self.tabs.setTabIcon(3, theme.icon("sliders"))
+        self.player.apply_icons()
+        self.welcome.apply_icons()
+        self.welcome.set_recent(self.settings.recent)
+
+    def set_theme(self, name: str):
+        self.settings.theme = name
+        self.settings.save()
+        theme.apply_theme(QApplication.instance(), name)
+        if name in self.theme_actions:
+            self.theme_actions[name].setChecked(True)
+        self._apply_icons()
+        self.chars.reload()
+        self.timeline.canvas.update()
+        self.table.viewport().update()
+        self._update_now_line(self.player.position())
+
+    def toggle_theme(self):
+        self.set_theme("light" if theme.current().dark else "dark")
 
     def _fill_recent(self):
         self.recent_menu.clear()
@@ -287,28 +423,93 @@ class MainWindow(QMainWindow):
             a = self.recent_menu.addAction(p)
             a.triggered.connect(lambda _=False, path=p: self.open_project(path))
         self.recent_menu.setEnabled(bool(self.settings.recent))
+        self.welcome.set_recent(self.settings.recent)
 
     # ================================================================ состояние
     def _update_title(self):
-        name = Path(self.project.path).name if self.project and self.project.path else \
+        name = Path(self.project.path).stem if self.project and self.project.path else \
             ("без имени" if self.project else "")
-        star = " *" if self.dirty else ""
+        star = " •" if self.dirty else ""
         self.setWindowTitle(f"{name}{star} — {APP_NAME}" if name else APP_NAME)
 
     def _update_actions(self):
         has = self.project is not None
         busy = self.task is not None
-        for a in (self.a_save, self.a_save_as, self.a_import, self.a_export, self.a_export_srt,
-                  self.a_synth_all, self.a_synth_sel, self.a_preview, self.a_preview_full,
-                  self.a_separate, self.a_auto_voices):
+        for a in (self.a_save, self.a_save_as, self.a_close, self.a_import, self.a_export,
+                  self.a_export_srt, self.a_synth_all, self.a_synth_sel, self.a_preview,
+                  self.a_preview_full, self.a_separate, self.a_auto_voices, self.a_whisper,
+                  self.a_cleanup):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
+        self._update_undo_actions()
 
-    def mark_dirty(self):
+    def _update_undo_actions(self):
+        busy = self.task is not None
+        ok_u = bool(self.project) and not busy and (self.history.can_undo() or bool(self._pending_label))
+        ok_r = bool(self.project) and not busy and self.history.can_redo()
+        self.a_undo.setEnabled(ok_u)
+        self.a_redo.setEnabled(ok_r)
+        ul = self._pending_label or self.history.undo_label()
+        self.a_undo.setText(f"Отменить: {ul}" if ok_u and ul else "Отменить")
+        self.a_redo.setText(f"Повторить: {self.history.redo_label()}" if ok_r else "Повторить")
+        self.a_undo.setToolTip(self.a_undo.text() + " (Ctrl+Z)")
+        self.a_redo.setToolTip(self.a_redo.text() + " (Ctrl+Y)")
+
+    def mark_dirty(self, label: str = "Изменение"):
+        """Вызывается после любого изменения проекта: помечает несохранённым и
+        откладывает фиксацию шага истории (быстрые правки склеиваются)."""
+        if self._restoring or not self.project:
+            return
         if not self.dirty:
             self.dirty = True
             self._update_title()
+        self._pending_label = label
+        self.commit_timer.start()
+        self._update_undo_actions()
+
+    def _commit(self):
+        if self.project and self._pending_label:
+            self.history.commit(self.project, self._pending_label)
+        self._pending_label = ""
+        self._update_undo_actions()
+
+    def flush_history(self):
+        if self.commit_timer.isActive():
+            self.commit_timer.stop()
+        self._commit()
+
+    def undo(self):
+        self._undo_redo(True)
+
+    def redo(self):
+        self._undo_redo(False)
+
+    def _undo_redo(self, undo: bool):
+        if not self.project or self.task or self.record.is_recording():
+            return
+        self.flush_history()
+        cur = self.current_line()
+        cur_id = cur.id if cur else None
+        label = self.history.undo(self.project) if undo else self.history.redo(self.project)
+        if label is None:
+            return
+        self._restoring = True
+        try:
+            self.chars.reload()
+            self.refresh_all()
+            bg = self.project.resolve(self.project.background_wav)
+            self.mix_panel.set_mix(self.project.mix, bool(bg and bg.exists()))
+            if cur_id and self.lines_model.row_of(cur_id) >= 0:
+                self.select_line(cur_id, seek=False)
+            else:
+                self._on_table_selection()
+        finally:
+            self._restoring = False
+        self.dirty = True
+        self._update_title()
+        self._update_undo_actions()
+        self.statusBar().showMessage(("Отменено: " if undo else "Повторено: ") + label, 4000)
 
     def _update_stats(self):
         if not self.project:
@@ -320,15 +521,17 @@ class MainWindow(QMainWindow):
             counts[s] = counts.get(s, 0) + 1
         total = len(self.project.lines)
         ready = counts.get("ok", 0) + counts.get("rec", 0)
+        pct = int(ready * 100 / total) if total else 0
         self.stats.setText(
-            f"Реплик: {total} · готово: {ready} · нет звука: {counts.get('none', 0)} · "
-            f"устарели: {counts.get('stale', 0)} · без роли: {counts.get('nochar', 0)}")
+            f"Готово {ready} из {total} ({pct}%)  ·  нет звука: {counts.get('none', 0)}  ·  "
+            f"устарели: {counts.get('stale', 0)}  ·  без роли: {counts.get('nochar', 0)}")
 
     def refresh_all(self):
         self.lines_model.reset()
         self.timeline.refresh()
         self._fill_char_combos()
         self._update_stats()
+        self._update_now_line(self.player.position())
 
     def _fill_char_combos(self):
         cur_f = self.f_char.currentData() if self.f_char.count() else "*"
@@ -340,20 +543,42 @@ class MainWindow(QMainWindow):
         self.assign.addItem("— выбрать —", "__none__")
         self.assign.addItem("— без роли —", "")
         if self.project:
+            from .characters_panel import color_icon
             for c in self.project.characters:
-                self.f_char.addItem(c.name, c.id)
-                self.assign.addItem(c.name, c.id)
+                self.f_char.addItem(color_icon(c.color), c.name, c.id)
+                self.assign.addItem(color_icon(c.color), c.name, c.id)
             self.assign.addItem("+ Новый персонаж…", "__new__")
         i = self.f_char.findData(cur_f) if cur_f != "*" else 0
         self.f_char.setCurrentIndex(max(0, i))
         self.f_char.blockSignals(False)
         self._apply_filter()
 
+    def _update_now_line(self, t: float):
+        if not self.project:
+            self.now_lbl.setText("")
+            return
+        th = theme.current()
+        parts = []
+        for ln in self.project.lines:
+            if ln.start > t:
+                break
+            if ln.start <= t <= ln.end and ln.enabled:
+                ch = self.project.character(ln.character_id)
+                color = ch.color if ch else th.muted
+                name = ch.name if ch else "без роли"
+                text = ln.text.replace("<", "&lt;")
+                parts.append(f"<span style='color:{color}'>●</span> <b style='color:{color}'>{name}:</b>"
+                             f" {text}")
+        self.now_lbl.setText("<br>".join(parts[:3]) if parts else
+                             f"<span style='color:{th.muted}'>—</span>")
+
     # ================================================================ проект
     def set_project(self, p: Optional[Project]):
         self.player.clear()
         self.project = p
         self.dirty = False
+        self._pending_label = ""
+        self.history.reset(p)
         self.lines_model.set_project(p)
         self.timeline.set_project(p)
         self.chars.set_project(p)
@@ -362,20 +587,41 @@ class MainWindow(QMainWindow):
         self.mix_panel.set_mix(p.mix if p else None, bool(bg and bg.exists()))
         self._fill_char_combos()
         self._update_stats()
+        self.stack.setCurrentIndex(1 if p else 0)
         if p and p.video_path:
             if Path(p.video_path).exists():
                 self.player.load(p.video_path)
             else:
                 QMessageBox.warning(self, "Видео не найдено",
-                                    f"Файл видео не найден:\n{p.video_path}\n\n"
-                                    "Укажите его заново.")
+                                    f"Файл видео не найден:\n{p.video_path}\n\nУкажите его заново.")
                 path, _ = QFileDialog.getOpenFileName(self, "Где видео?", "", VIDEO_FILTER)
                 if path:
                     p.video_path = path
                     self.player.load(path)
-                    self.mark_dirty()
+                    self.dirty = True
+        self._load_waveform()
+        self._update_now_line(0.0)
         self._update_title()
         self._update_actions()
+
+    def _load_waveform(self):
+        """Фоновый расчёт волны оригинала для таймлайна (не блокирует интерфейс)."""
+        p = self.project
+        if not p:
+            return
+        wav = p.resolve(p.original_wav)
+        if not wav or not wav.exists():
+            return
+        cache = p.project_dir / "cache"
+
+        def work(t: Task):
+            return compute_peaks(str(wav), PEAKS_PER_SEC, cache, t.is_cancelled)
+
+        task = Task("Волна", work)
+        task.signals.result.connect(
+            lambda pk: self.project is p and self.timeline.canvas.set_peaks(pk, PEAKS_PER_SEC))
+        self._wave_task = task
+        pool().start(task)
 
     def maybe_save(self) -> bool:
         if not self.project or not self.dirty:
@@ -387,6 +633,11 @@ class MainWindow(QMainWindow):
         if r == QMessageBox.Save:
             return self.save_project()
         return True
+
+    def close_project(self):
+        if self.task or not self.maybe_save():
+            return
+        self.set_project(None)
 
     def new_project(self, video: str = ""):
         if self.task or not self.maybe_save():
@@ -403,7 +654,7 @@ class MainWindow(QMainWindow):
                 "(«Нет» — выбрать другое имя для нового проекта)",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
             if r == QMessageBox.Yes:
-                self.open_project(str(vop))
+                self.open_project(str(vop), ask=False)
                 return
             if r == QMessageBox.Cancel:
                 return
@@ -426,8 +677,12 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Звук оригинала извлечён", 5000)
             if subs:
                 self.import_subtitles(subs)
-            elif p.mix.mode == MixMode.DUBBING:
-                self.separate()
+            elif QMessageBox.question(
+                    self, "Текст реплик",
+                    "Субтитры не выбраны. Распознать речь в фильме с помощью Whisper?\n\n"
+                    "(Можно сделать позже: «Обработка → Распознать» или импортировать субтитры.)"
+            ) == QMessageBox.Yes:
+                self.run_whisper()
 
         self.extract_original(after_extract)
 
@@ -445,8 +700,8 @@ class MainWindow(QMainWindow):
 
         def done(path):
             p.original_wav = p.relative(Path(path))
-            self.mark_dirty()
             self.save_project()
+            self._load_waveform()
             if then:
                 then(path)
 
@@ -455,10 +710,12 @@ class MainWindow(QMainWindow):
     def open_project_dialog(self):
         if self.task or not self.maybe_save():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Открыть проект", "",
-                                              PROJECT_FILTER + ";;Видео (для нового проекта) (*.mkv *.mp4 *.avi)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Открыть проект", "",
+            PROJECT_FILTER + ";;Видео (для нового проекта) (*.mkv *.mp4 *.avi *.mov *.webm)")
         if path:
             if Path(path).suffix.lower() != PROJECT_EXT:
+                self.dirty = False
                 self.new_project(path)
             else:
                 self.open_project(path, ask=False)
@@ -480,15 +737,15 @@ class MainWindow(QMainWindow):
         self._fill_recent()
         self.set_project(p)
         orig = p.resolve(p.original_wav)
-        if not orig or not orig.exists():
-            if p.video_path and Path(p.video_path).exists():
-                self.extract_original()
+        if (not orig or not orig.exists()) and p.video_path and Path(p.video_path).exists():
+            self.extract_original()
 
     def save_project(self) -> bool:
         if not self.project:
             return False
         if not self.project.path:
             return self.save_project_as()
+        self.flush_history()
         try:
             self.project.save()
         except Exception as e:  # noqa: BLE001
@@ -523,7 +780,41 @@ class MainWindow(QMainWindow):
         if self.project and self.project.path and self.dirty and not self.task:
             self.save_project()
 
-    # ================================================================ субтитры
+    def cleanup_files(self):
+        """Удалить синтез и записи, на которые не ссылаются ни проект, ни история отмены."""
+        p = self.project
+        if not p:
+            return
+        self.flush_history()
+        used: set[str] = set()
+        states = [p.snapshot()] + [s.state for s in self.history._undo + self.history._redo]
+        for st in states:
+            for ln in st["lines"]:
+                for key in ("tts_path", "rec_path"):
+                    if ln.get(key):
+                        used.add(str(p.resolve(ln[key]).resolve()))
+        junk = []
+        for sub in ("tts", "rec"):
+            d = p.project_dir / sub
+            if d.exists():
+                junk += [f for f in d.iterdir() if f.is_file() and str(f.resolve()) not in used]
+        cache = p.project_dir / "cache"
+        cache_files = list(cache.glob("*.wav")) if cache.exists() else []
+        size = sum(f.stat().st_size for f in junk + cache_files) / 1e6
+        if not junk and not cache_files:
+            QMessageBox.information(self, "Очистка", "Неиспользуемых файлов нет.")
+            return
+        if QMessageBox.question(
+                self, "Очистка",
+                f"Будут удалены неиспользуемые дубли и синтез ({len(junk)} файлов) и кэш сведения "
+                f"({len(cache_files)}), всего {size:.0f} МБ.\nПродолжить?") != QMessageBox.Yes:
+            return
+        for f in junk + cache_files:
+            f.unlink(missing_ok=True)
+        self.refresh_all()
+        self.statusBar().showMessage(f"Освобождено {size:.0f} МБ", 6000)
+
+    # ================================================================ субтитры и распознавание
     def import_subtitles(self, path: str = ""):
         if not self.project:
             return
@@ -560,9 +851,58 @@ class MainWindow(QMainWindow):
         p.sort_lines()
         self.chars.reload()
         self.refresh_all()
-        self.mark_dirty()
+        self.mark_dirty("Импорт субтитров")
         self.statusBar().showMessage(f"Импортировано реплик: {len(dlg.lines)}, "
                                      f"новых персонажей: {len(new_chars)}", 8000)
+
+    def run_whisper(self):
+        p = self.project
+        if not p:
+            return
+        ok, why = whisper_available()
+        if not ok:
+            QMessageBox.warning(self, "Распознавание речи", why)
+            return
+        orig = p.resolve(p.original_wav)
+        if not orig or not orig.exists():
+            self.extract_original(lambda _: self.run_whisper())
+            return
+        vocals = p.project_dir / "vocals.wav"
+        dlg = TranscribeDialog(self.settings, vocals.exists(), bool(p.lines),
+                               self.player.position(), p.duration, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        src = str(vocals if dlg.source.currentData() == "vocals" else orig)
+        t_from, t_to = dlg.time_range()
+        replace = dlg.replace.isChecked()
+        s = self.settings
+        lang = s.whisper_language or None
+        root = str(data_dir() / "models" / "whisper")
+
+        def work(t: Task):
+            return transcribe(src, s.whisper_model, lang, s.whisper_device, t_from, t_to,
+                              s.whisper_max_len, root, t.report, t.is_cancelled)
+
+        def done(res):
+            lines, detected = res
+            end = t_to if t_to is not None else float("inf")
+            if replace:
+                p.lines = [ln for ln in p.lines if ln.end <= t_from or ln.start >= end]
+            for sl in lines:
+                p.lines.append(Line(sl.start, sl.end, sl.text, None))
+            p.sort_lines()
+            self.chars.reload()
+            self.refresh_all()
+            self.mark_dirty("Распознавание речи")
+            self.save_project()
+            self.tabs.setCurrentIndex(0)
+            QMessageBox.information(
+                self, "Распознавание завершено",
+                f"Распознано реплик: {len(lines)} (язык: {detected or '?'}).\n\n"
+                "Дальше: выделите реплики одного персонажа (Ctrl/Shift+клик) и выберите "
+                "его в списке «Роль». Текст можно править прямо в таблице.")
+
+        self.run_task(Task("Распознавание речи", work), done)
 
     def export_script(self):
         if not self.project:
@@ -585,14 +925,18 @@ class MainWindow(QMainWindow):
             return []
         rows = sorted({self.lines_filter.mapToSource(i).row()
                        for i in self.table.selectionModel().selectedRows()})
-        return [self.project.lines[r] for r in rows]
+        return [self.project.lines[r] for r in rows if 0 <= r < len(self.project.lines)]
 
     def current_line(self) -> Optional[Line]:
+        if not self.project:
+            return None
         idx = self.table.currentIndex()
-        if not idx.isValid() or not self.project:
-            sel = self.selected_lines()
-            return sel[0] if sel else None
-        return self.project.lines[self.lines_filter.mapToSource(idx).row()]
+        if idx.isValid():
+            r = self.lines_filter.mapToSource(idx).row()
+            if 0 <= r < len(self.project.lines):
+                return self.project.lines[r]
+        sel = self.selected_lines()
+        return sel[0] if sel else None
 
     def select_line(self, line_id: str, seek: bool = True):
         row = self.lines_model.row_of(line_id)
@@ -622,7 +966,7 @@ class MainWindow(QMainWindow):
         self.note_edit.setText(ln.note if ln else "")
         if ln:
             self.timeline.canvas.ensure_visible(ln.start, ln.end)
-            if not self.player.is_playing() and not self.record.is_recording():
+            if not self.player.is_playing() and not self.record.is_recording() and not self._restoring:
                 self.player.seek(ln.start)
         self._update_record_line()
         self.timeline.canvas.update()
@@ -641,27 +985,25 @@ class MainWindow(QMainWindow):
     def _select_line_from_timeline(self, line_id: str):
         self.select_line(line_id, seek=False)
 
-    def _on_table_double(self, idx):
-        pass  # редактирование выполняет делегат
-
-    def _on_line_edited(self, line_id: str):
+    def _on_line_edited(self, line_id: str, label: str = "Правка реплики"):
         self.lines_model.refresh_line(line_id)
         self.timeline.canvas.update()
         self._update_stats()
-        self.mark_dirty()
+        self._update_now_line(self.player.position())
+        self.mark_dirty(label)
 
     def _text_edited(self):
         ln = self.current_line()
         if ln is None:
             return
         ln.text = self.text_edit.toPlainText().strip()
-        self._on_line_edited(ln.id)
+        self._on_line_edited(ln.id, "Правка текста")
 
     def _note_edited(self):
         ln = self.current_line()
         if ln is not None and ln.note != self.note_edit.text():
             ln.note = self.note_edit.text()
-            self.mark_dirty()
+            self.mark_dirty("Заметка")
 
     def _apply_filter(self, *_):
         self.lines_filter.set_filter(self.search.text(), self.f_char.currentData(),
@@ -698,7 +1040,7 @@ class MainWindow(QMainWindow):
         self.chars.reload()
         self.timeline.refresh()
         self._update_stats()
-        self.mark_dirty()
+        self.mark_dirty("Назначение роли")
 
     def add_line(self):
         if not self.project:
@@ -714,22 +1056,20 @@ class MainWindow(QMainWindow):
         self.select_line(ln.id, seek=False)
         self.tabs.setCurrentIndex(0)
         self.text_edit.setFocus()
-        self.mark_dirty()
+        self.mark_dirty("Новая реплика")
 
     def delete_lines(self):
         lines = self.selected_lines()
         if not lines or not self.project:
             return
-        if len(lines) > 1 and QMessageBox.question(
-                self, "Удалить", f"Удалить реплики: {len(lines)}?") != QMessageBox.Yes:
-            return
         ids = {ln.id for ln in lines}
         self.project.lines = [ln for ln in self.project.lines if ln.id not in ids]
         self.refresh_all()
-        self.mark_dirty()
+        self.mark_dirty(f"Удаление реплик ({len(ids)})")
+        self.statusBar().showMessage(f"Удалено реплик: {len(ids)}. Ctrl+Z — вернуть.", 5000)
 
     def _step_line(self, delta: int):
-        """Перейти к соседней реплике (для записи — той же роли, если она задана)."""
+        """Перейти к соседней реплике (для записи — той же роли)."""
         if not self.project or not self.project.lines:
             return
         cur = self.current_line()
@@ -780,14 +1120,14 @@ class MainWindow(QMainWindow):
         self.lines_model.refresh_all()
         self.timeline.canvas.update()
         self._update_stats()
-        self.mark_dirty()
+        self.mark_dirty("Настройки персонажа")
 
     def _on_chars_list_changed(self):
         self._fill_char_combos()
         self.lines_model.refresh_all()
         self.timeline.refresh()
         self._update_stats()
-        self.mark_dirty()
+        self.mark_dirty("Персонажи")
 
     def preview_voice(self, ch, text: str):
         if ch.source != LineSource.TTS:
@@ -801,14 +1141,15 @@ class MainWindow(QMainWindow):
             t.report(0.2, f"Синтез примера: {ch.name}")
             return preview_text(engine, voice, text, base, rate, pitch)
 
-        self.run_task(Task("Прослушивание голоса", work), self.play_file, quiet=True)
+        self.run_task(Task("Прослушивание голоса", work), self.play_file)
 
     # ================================================================ задачи
     def run_task(self, task: Task, on_result: Optional[Callable] = None,
-                 on_message: Optional[Callable] = None, quiet: bool = False):
+                 on_message: Optional[Callable] = None):
         if self.task is not None:
             QMessageBox.information(self, "Подождите", f"Выполняется: {self.task.title}")
             return
+        self.flush_history()
         self.task = task
         self.progress.setValue(0)
         self.progress.show()
@@ -834,11 +1175,12 @@ class MainWindow(QMainWindow):
         task.signals.progress.connect(prog)
         task.signals.error.connect(err)
         task.signals.cancelled.connect(lambda: self.statusBar().showMessage("Отменено", 4000))
+        # сначала снимаем «занято», затем обрабатываем результат (он может запустить новую задачу)
+        task.signals.finished.connect(fin)
         if on_result:
-            task.signals.result.connect(on_result)
+            task.signals.result.connect(lambda r: QTimer.singleShot(0, lambda: on_result(r)))
         if on_message:
             task.signals.message.connect(on_message)
-        task.signals.finished.connect(fin)
         pool().start(task)
 
     def cancel_task(self):
@@ -877,8 +1219,8 @@ class MainWindow(QMainWindow):
                     self, "Готово", "Голоса отделены. Переключить проект в режим дубляжа?"
             ) == QMessageBox.Yes:
                 p.mix.mode = MixMode.DUBBING
+                self.mark_dirty("Режим дубляжа")
             self.mix_panel.set_mix(p.mix, True)
-            self.mark_dirty()
             self.save_project()
             self.statusBar().showMessage("Фон без голосов готов", 8000)
 
@@ -921,10 +1263,10 @@ class MainWindow(QMainWindow):
             else:
                 ln.tts_path, ln.tts_hash = r.path, r.hash
                 self.lines_model.refresh_line(ln.id)
-            self.mark_dirty()
+                self.timeline.canvas.update()
+            self.mark_dirty("Синтез")
 
         def done(n_err):
-            self.timeline.canvas.update()
             self._update_stats()
             self.save_project()
             if errors:
@@ -956,11 +1298,12 @@ class MainWindow(QMainWindow):
             import soundfile as sf
             length = sf.info(out).duration
             self.player.set_preview(out, rng[0], length)
+            self.timeline.canvas.preview_range = (rng[0], rng[0] + length)
             self.statusBar().showMessage(
                 f"Превью {fmt_clock(rng[0])}–{fmt_clock(rng[0] + length)} готово. "
                 f"Звук плеера переключён на озвучку.", 8000)
-            self.player.seek(rng[0] if autoplay or seconds is not None else self.player.position())
             if autoplay or seconds is not None:
+                self.player.seek(rng[0])
                 self.player.play()
 
         self.run_task(Task("Сборка превью", work), done)
@@ -1031,9 +1374,6 @@ class MainWindow(QMainWindow):
         lay.addWidget(bb)
         dlg.exec()
 
-    def _on_mix_changed(self):
-        self.mark_dirty()
-
     # ================================================================ прочее
     def open_settings(self):
         SettingsDialog(self.settings, self).exec()
@@ -1043,15 +1383,23 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, APP_NAME,
                           f"<b>{APP_NAME}</b> {__version__}<br>"
                           "Многоголосая озвучка фильмов, сериалов, мультфильмов и аниме.<br><br>"
-                          "Синтез: Edge TTS, Silero. Отделение голосов: Demucs. "
-                          "Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
+                          "Синтез: Edge TTS, Silero. Распознавание: Whisper (faster-whisper). "
+                          "Отделение голосов: Demucs. Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
 
     def help(self):
         QMessageBox.information(self, "Как пользоваться", HELP_TEXT)
 
     def eventFilter(self, obj, ev):
         # Горячие клавиши, которые не должны мешать вводу текста
-        if ev.type() == QEvent.KeyPress and self.isActiveWindow() and self.project:
+        try:
+            if ev.type() == QEvent.KeyPress and self.isActiveWindow() and self.project:
+                return self._hotkey(ev) or super().eventFilter(obj, ev)
+            return super().eventFilter(obj, ev)
+        except RuntimeError:   # окно уже уничтожено (завершение программы)
+            return False
+
+    def _hotkey(self, ev) -> bool:
+        if True:
             fw = QApplication.focusWidget()
             typing = isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox)) or \
                 (isinstance(fw, QComboBox) and fw.isEditable()) or \
@@ -1079,13 +1427,7 @@ class MainWindow(QMainWindow):
                 if key in (Qt.Key_Left, Qt.Key_Right) and fw is not self.table:
                     self.player.seek(self.player.position() + (-2 if key == Qt.Key_Left else 2))
                     return True
-            if ev.modifiers() & Qt.ControlModifier and ev.key() in (Qt.Key_Plus, Qt.Key_Equal):
-                self.timeline.canvas.zoom(1.25)
-                return True
-            if ev.modifiers() & Qt.ControlModifier and ev.key() == Qt.Key_Minus:
-                self.timeline.canvas.zoom(0.8)
-                return True
-        return super().eventFilter(obj, ev)
+        return False
 
     def closeEvent(self, e):
         if self.task:
@@ -1100,32 +1442,30 @@ class MainWindow(QMainWindow):
             return
         self.record.shutdown()
         self.settings.save()
+        QApplication.instance().removeEventFilter(self)
         e.accept()
 
 
 HELP_TEXT = """Порядок работы:
 
-1. Файл → Новый проект: выберите видео, аудиодорожку и (по желанию) субтитры.
+1. Новый проект: выберите видео, аудиодорожку и (по желанию) субтитры.
    Тип озвучки: закадровая (оригинал тихо) или дубляж (голоса удаляются).
 
-2. Импорт субтитров (SRT/ASS/VTT). Персонажи берутся из поля Actor в ASS,
-   из тега <v> в VTT или из префикса «Имя: текст» в SRT.
+2. Текст реплик: импорт субтитров (SRT/ASS/VTT) или «Распознать» (Whisper).
+   Персонажи из субтитров создаются сами; после распознавания роли
+   назначаются вручную: выделите реплики → список «Роль».
 
-3. Вкладка «Персонажи»: для каждой роли выберите озвучку —
-   AI-голос (движок, голос, темп, высота) или живую запись актёра.
+3. Вкладка «Персонажи»: для каждой роли — AI-голос (движок, голос, темп,
+   высота) или живая запись актёра.
 
-4. Вкладка «Реплики»: правьте текст, тайминги и роли.
-   Выделите реплики и выберите «Роль», чтобы назначить персонажа.
+4. F5 — синтезировать AI-реплики. Вкладка «Запись» — записать живые роли.
 
-5. F5 — синтезировать AI-реплики. Вкладка «Запись» — записать живые роли:
-   видео проигрывается с преролла, говорите, когда появится «ГОВОРИТЕ».
+5. Для дубляжа: «Отделить голоса» (Demucs).
 
-6. Для дубляжа: Обработка → Отделить голоса (Demucs).
+6. F6 — превью минуты от курсора вместе с видео. Ctrl+E — экспорт.
 
-7. F6 — превью минуты от курсора вместе с видео.
-   Ctrl+E — экспорт видео с новой дорожкой.
-
-Клавиши: Пробел — пуск/пауза, ←/→ — перемотка, P — звук реплики,
-N — новая реплика, R — запись (на вкладке «Запись»), Del — удалить,
-Ctrl+колесо на таймлайне — масштаб, двойной клик по блоку — проиграть.
+Клавиши: Ctrl+Z / Ctrl+Y — отменить / повторить, Пробел — пуск/пауза,
+←/→ — перемотка, P — звук реплики, N — новая реплика, R — запись,
+Del — удалить, Ctrl+T — сменить тему, Ctrl+колесо на таймлайне — масштаб,
+двойной клик по блоку — проиграть реплику.
 """

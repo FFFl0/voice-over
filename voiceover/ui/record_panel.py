@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import soundfile as sf
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame,
                                QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
 
@@ -17,6 +17,7 @@ from ..core.mixer import silence_bounds
 from ..core.models import Line, Project
 from ..core.recorder import Recorder, find_device, input_devices, sd_available
 from ..core.settings import AppSettings
+from . import theme
 from .video_player import VideoPlayer
 
 
@@ -37,13 +38,14 @@ class RecordPanel(QWidget):
         self._get_neighbors: Optional[Callable[[], tuple[str, str]]] = None
 
         self.device = QComboBox()
-        self.btn_refresh = QPushButton("⟳")
-        self.btn_refresh.setFixedWidth(30)
+        self.btn_refresh = QPushButton(theme.icon("refresh"), "")
+        self.btn_refresh.setFixedWidth(40)
         self.btn_refresh.setToolTip("Обновить список устройств")
         self.level = QProgressBar()
         self.level.setRange(0, 100)
         self.level.setTextVisible(False)
-        self.level.setFixedHeight(10)
+        self.level.setFixedHeight(8)
+        self.level.setObjectName("level")
         self.preroll = QDoubleSpinBox()
         self.preroll.setRange(0, 10)
         self.preroll.setSuffix(" с")
@@ -57,7 +59,7 @@ class RecordPanel(QWidget):
         self.mute_video.setToolTip("Включите, если пишете без наушников, чтобы оригинал не попал в микрофон")
 
         self.prev_lbl = QLabel()
-        self.prev_lbl.setStyleSheet("color:gray")
+        self.prev_lbl.setObjectName("muted")
         self.prev_lbl.setWordWrap(True)
         self.who = QLabel()
         self.prompt = QLabel("Выберите реплику в таблице")
@@ -67,9 +69,10 @@ class RecordPanel(QWidget):
         self.prompt.setWordWrap(True)
         self.prompt.setMinimumHeight(70)
         self.prompt.setAlignment(Qt.AlignCenter)
-        self.prompt.setStyleSheet("border:1px solid palette(mid); border-radius:6px; padding:8px")
+        self.prompt.setObjectName("promptText")
+        self.prompt.setStyleSheet("padding:14px; font-size:18pt; font-weight:500")
         self.next_lbl = QLabel()
-        self.next_lbl.setStyleSheet("color:gray")
+        self.next_lbl.setObjectName("muted")
         self.next_lbl.setWordWrap(True)
         self.countdown = QLabel()
         self.countdown.setAlignment(Qt.AlignCenter)
@@ -77,15 +80,18 @@ class RecordPanel(QWidget):
         cf.setPointSizeF(cf.pointSizeF() * 1.4)
         cf.setBold(True)
         self.countdown.setFont(cf)
+        self.countdown.setStyleSheet("font-size:14pt; font-weight:700")
 
-        self.btn_rec = QPushButton("● Записать (R)")
-        self.btn_rec.setStyleSheet("QPushButton{color:#c62828;font-weight:bold}")
-        self.btn_stop = QPushButton("■ Стоп")
-        self.btn_play = QPushButton("▶ Дубль")
+        self.btn_rec = QPushButton(theme.icon("record", theme.current().danger), " Записать (R)")
+        self.btn_rec.setProperty("danger", True)
+        self.btn_stop = QPushButton(theme.icon("stop"), " Стоп")
+        self.btn_play = QPushButton(theme.icon("headphones"), " Дубль")
         self.btn_play.setToolTip("Прослушать запись вместе с видео")
-        self.btn_del = QPushButton("✕ Удалить запись")
-        self.btn_prev = QPushButton("◀ Пред.")
-        self.btn_next = QPushButton("След. ▶")
+        self.btn_del = QPushButton(theme.icon("trash"), " Удалить запись")
+        self.btn_prev = QPushButton(theme.icon("back"), "")
+        self.btn_prev.setToolTip("Предыдущая реплика этой роли")
+        self.btn_next = QPushButton(theme.icon("fwd"), "")
+        self.btn_next.setToolTip("Следующая реплика этой роли")
         self.offset = QDoubleSpinBox()
         self.offset.setRange(-10, 10)
         self.offset.setSingleStep(0.05)
@@ -116,13 +122,21 @@ class RecordPanel(QWidget):
         take.addWidget(self.take_lbl, 1)
         take.addWidget(self.btn_del)
 
+        card = QFrame()
+        card.setObjectName("prompt")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(16, 12, 16, 12)
+        cl.addWidget(self.who)
+        cl.addWidget(self.prev_lbl)
+        cl.addWidget(self.prompt)
+        cl.addWidget(self.next_lbl)
+        cl.addWidget(self.countdown)
+
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(10)
         lay.addLayout(form)
-        lay.addWidget(self.prev_lbl)
-        lay.addWidget(self.who)
-        lay.addWidget(self.prompt)
-        lay.addWidget(self.next_lbl)
-        lay.addWidget(self.countdown)
+        lay.addWidget(card)
         lay.addLayout(btns)
         lay.addLayout(take)
         lay.addStretch(1)
@@ -207,8 +221,11 @@ class RecordPanel(QWidget):
             who = ch.name if ch else "без роли"
             if ch and ch.actor:
                 who += f" — {ch.actor}"
-            self.who.setText(f"<b style='color:{ch.color if ch else '#888'}'>{who}</b> "
-                             f"&nbsp; {ln.start:.2f}–{ln.end:.2f} с ({ln.duration:.1f} с)")
+            muted = theme.current().muted
+            self.who.setText(f"<span style='color:{ch.color if ch else muted};font-size:13pt'>●</span> "
+                             f"<b>{who}</b> &nbsp; <span style='color:{muted}'>"
+                             f"{ln.start:.2f}–{ln.end:.2f} с · {ln.duration:.1f} с</span>"
+                             + (f"<br><i style='color:{muted}'>{ln.note}</i>" if ln.note else ""))
             self.prompt.setText(ln.text)
             self.prev_lbl.setText(f"↑ {prev_text}" if prev_text else "")
             self.next_lbl.setText(f"↓ {next_text}" if next_text else "")
@@ -289,11 +306,9 @@ class RecordPanel(QWidget):
                 sf.write(self._rec_path, data[a:b], sr, subtype="PCM_24")
         except Exception:
             pass
-        old = self.project.resolve(ln.rec_path) if ln.rec_path else None
+        # Прежние дубли не удаляем: к ним можно вернуться через «Отменить»
         ln.rec_path = self.project.relative(Path(self._rec_path))
         ln.rec_offset = round(offset, 3)
-        if old and old.exists() and str(old) != self._rec_path:
-            old.unlink(missing_ok=True)   # храним только последний дубль
         self.set_line(ln)
         self.recorded.emit(ln.id)
         if self.auto_next.isChecked() and self.auto_stop.isChecked():
@@ -308,10 +323,10 @@ class RecordPanel(QWidget):
         to_start = self.line.start - t
         if to_start > 0.05:
             self.countdown.setText(f"Приготовьтесь… {to_start:.1f}")
-            self.countdown.setStyleSheet("color:#ef6c00")
+            self.countdown.setStyleSheet(f"color:{theme.current().warn}; font-size:14pt; font-weight:700")
         elif t <= self.line.end:
             self.countdown.setText("● ГОВОРИТЕ")
-            self.countdown.setStyleSheet("color:#c62828")
+            self.countdown.setStyleSheet(f"color:{theme.current().danger}; font-size:14pt; font-weight:700")
         else:
             self.countdown.setText("● запись…")
         if self.auto_stop.isChecked() and t > self.line.end + self.settings.record_postroll:
@@ -327,9 +342,7 @@ class RecordPanel(QWidget):
     def _delete_take(self):
         if not self.line or not self.project:
             return
-        p = self.project.resolve(self.line.rec_path)
-        if p and p.exists():
-            p.unlink()
+        # файл остаётся на диске, чтобы удаление можно было отменить
         self.line.rec_path = ""
         self.line.rec_offset = 0.0
         self.set_line(self.line)

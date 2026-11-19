@@ -98,3 +98,13 @@ def test_long_render_chunks(tmp_path, monkeypatch):
     ya, _ = sf.read(a)
     yb, _ = sf.read(b)
     assert np.max(np.abs(ya - yb)) < 1e-4
+
+
+def test_peaks(tmp_path):
+    from voiceover.core.waveform import compute_peaks
+    x = np.concatenate([np.zeros(SR), tone(1.0, amp=0.5)])
+    sf.write(tmp_path / "w.wav", x, SR)
+    pk = compute_peaks(str(tmp_path / "w.wav"), 50, tmp_path / "c")
+    assert len(pk) == 100 and pk[:50].max() == 0 and abs(float(pk[60]) - 0.5) < 0.01
+    assert list((tmp_path / "c").glob("*.npy"))
+    assert np.array_equal(compute_peaks(str(tmp_path / "w.wav"), 50, tmp_path / "c"), pk)

@@ -24,6 +24,11 @@ class AppSettings:
     record_countdown: bool = True
     demucs_model: str = "htdemucs"
     demucs_device: str = "auto"     # auto | cuda | cpu
+    theme: str = "dark"             # dark | light
+    whisper_model: str = "large-v3-turbo"
+    whisper_language: str = ""      # "" — автоопределение
+    whisper_device: str = "auto"
+    whisper_max_len: float = 7.0
     recent: list[str] = field(default_factory=list)
 
     @classmethod

@@ -5,10 +5,11 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider, QStyle,
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..core.subtitles import fmt_clock
+from . import theme
 
 
 class VideoPlayer(QWidget):
@@ -24,6 +25,7 @@ class VideoPlayer(QWidget):
         self.video = QVideoWidget(self)
         self.video.setMinimumSize(320, 180)
         self.video.setStyleSheet("background:#000")
+        self.video.setObjectName("videoArea")
         self.player.setVideoOutput(self.video)
 
         # Второй плеер для превью озвучки (видео при этом без звука)
@@ -34,17 +36,18 @@ class VideoPlayer(QWidget):
         self._dub_len = 0.0
         self._stop_at: float | None = None
 
-        st = self.style()
-        self.btn_play = QToolButton(icon=st.standardIcon(QStyle.SP_MediaPlay))
+        self.btn_play = QToolButton()
         self.btn_play.setToolTip("Воспроизведение / пауза (Пробел)")
-        self.btn_back = QToolButton(icon=st.standardIcon(QStyle.SP_MediaSeekBackward))
+        self.btn_back = QToolButton()
         self.btn_back.setToolTip("Назад 5 с")
-        self.btn_fwd = QToolButton(icon=st.standardIcon(QStyle.SP_MediaSeekForward))
+        self.btn_fwd = QToolButton()
         self.btn_fwd.setToolTip("Вперёд 5 с")
+        self.vol_icon = QLabel()
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
         self.time_lbl = QLabel("00:00.000 / 00:00.000")
         self.time_lbl.setMinimumWidth(170)
+        self.time_lbl.setStyleSheet("font-family: Consolas, 'DejaVu Sans Mono', monospace;")
         self.sound = QComboBox()
         self.sound.addItems(["Звук: оригинал", "Звук: озвучка (превью)", "Без звука"])
         self.sound.setToolTip("Что слышно при воспроизведении. Превью собирается кнопкой "
@@ -55,13 +58,14 @@ class VideoPlayer(QWidget):
         self.vol.setFixedWidth(90)
 
         ctl = QHBoxLayout()
-        ctl.setContentsMargins(4, 2, 4, 2)
+        ctl.setContentsMargins(8, 6, 8, 6)
+        ctl.setSpacing(6)
         for w in (self.btn_back, self.btn_play, self.btn_fwd):
             ctl.addWidget(w)
         ctl.addWidget(self.slider, 1)
         ctl.addWidget(self.time_lbl)
         ctl.addWidget(self.sound)
-        ctl.addWidget(QLabel("🔊"))
+        ctl.addWidget(self.vol_icon)
         ctl.addWidget(self.vol)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -80,6 +84,14 @@ class VideoPlayer(QWidget):
         self._apply_sound()
 
         self._sync = QTimer(self, interval=500, timeout=self._sync_dub)
+        self.apply_icons()
+
+    def apply_icons(self) -> None:
+        self.btn_back.setIcon(theme.icon("back"))
+        self.btn_fwd.setIcon(theme.icon("fwd"))
+        self.btn_play.setIcon(theme.icon("pause" if self.is_playing() else "play"))
+        self.btn_play.setIconSize(self.btn_play.iconSize() * 1.2)
+        self.vol_icon.setPixmap(theme.icon("volume", theme.current().muted).pixmap(18, 18))
 
     # ------------------------------------------------------------ API
     def load(self, path: str) -> None:
@@ -158,8 +170,7 @@ class VideoPlayer(QWidget):
 
     def _on_state(self, state):
         playing = state == QMediaPlayer.PlayingState
-        self.btn_play.setIcon(self.style().standardIcon(
-            QStyle.SP_MediaPause if playing else QStyle.SP_MediaPlay))
+        self.btn_play.setIcon(theme.icon("pause" if playing else "play"))
         if playing:
             self._sync.start()
         else:

@@ -16,6 +16,7 @@ from ..core import ffmpeg
 from ..core.models import MixMode, MixSettings
 from ..core.settings import AppSettings
 from ..core.subtitles import SubLine, fmt_clock, load_subtitles
+from . import theme
 
 VIDEO_FILTER = "Видео (*.mkv *.mp4 *.avi *.mov *.webm *.m4v *.ts *.m2ts *.wmv *.flv);;Все файлы (*)"
 SUB_FILTER = "Субтитры (*.srt *.ass *.ssa *.vtt);;Все файлы (*)"
@@ -57,7 +58,7 @@ class NewProjectDialog(QDialog):
         self.mode_dub = QRadioButton("Дубляж — оригинальные голоса удаляются, музыка и звуки остаются")
         self.mode_vo.setChecked(True)
         self.info_lbl = QLabel()
-        self.info_lbl.setStyleSheet("color:gray")
+        self.info_lbl.setObjectName("muted")
 
         f = QFormLayout()
         f.addRow("Видео:", path_row(self.video, "Выберите видео", VIDEO_FILTER, parent=self))
@@ -169,6 +170,7 @@ class ImportSubsDialog(QDialog):
         f.addRow(self.replace)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Импортировать")
+        bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
@@ -275,11 +277,11 @@ class MixPanel(QWidget):
         if dub:
             if getattr(self, "_has_bg", False):
                 self.bg_status.setText("✔ Фон без голосов готов.")
-                self.bg_status.setStyleSheet("color:#2e7d32")
+                self.bg_status.setStyleSheet(f"color:{theme.current().ok}")
             else:
                 self.bg_status.setText("⚠ Фон без голосов ещё не создан: "
                                        "меню «Обработка → Отделить голоса».")
-                self.bg_status.setStyleSheet("color:#ef6c00")
+                self.bg_status.setStyleSheet(f"color:{theme.current().warn}")
         else:
             self.bg_status.setText("")
 
@@ -346,6 +348,7 @@ class ExportDialog(QDialog):
         f.addRow(self.keep_subs)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Экспортировать")
+        bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
@@ -434,10 +437,10 @@ class SettingsDialog(QDialog):
         ffmpeg.set_ffmpeg_path(self.ff.text().strip())
         try:
             self.ff_status.setText("Используется: " + ffmpeg.find_ffmpeg())
-            self.ff_status.setStyleSheet("color:gray")
+            self.ff_status.setStyleSheet(f"color:{theme.current().muted}")
         except ffmpeg.FFmpegError as e:
             self.ff_status.setText(str(e))
-            self.ff_status.setStyleSheet("color:#c62828")
+            self.ff_status.setStyleSheet(f"color:{theme.current().danger}")
 
     def _ok(self):
         self.s.ffmpeg_path = self.ff.text().strip()
@@ -456,3 +459,86 @@ def ask_text(parent, title: str, label: str, text: str = "") -> Optional[str]:
 
 __all__ = ["NewProjectDialog", "ImportSubsDialog", "MixPanel", "ExportDialog",
            "SettingsDialog", "VIDEO_FILTER", "SUB_FILTER", "Qt"]
+
+
+# ======================================================================== распознавание
+
+class TranscribeDialog(QDialog):
+    """Параметры распознавания речи Whisper."""
+
+    def __init__(self, s: AppSettings, has_vocals: bool, has_lines: bool,
+                 cursor: float, duration: float, parent=None):
+        super().__init__(parent)
+        from ..core.transcribe import LANGUAGES, MODELS
+        self.s = s
+        self.setWindowTitle("Распознать речь (Whisper)")
+        self.setMinimumWidth(560)
+        self.duration = duration
+        self.cursor = cursor
+
+        self.source = QComboBox()
+        if has_vocals:
+            self.source.addItem("Голоса после «Отделить голоса» (точнее)", "vocals")
+        self.source.addItem("Оригинальная дорожка", "original")
+        self.language = QComboBox()
+        for code, title in LANGUAGES:
+            self.language.addItem(title, code or "")
+        self.language.setCurrentIndex(max(0, self.language.findData(s.whisper_language)))
+        self.model = QComboBox()
+        for code, title in MODELS:
+            self.model.addItem(title, code)
+        self.model.setCurrentIndex(max(0, self.model.findData(s.whisper_model)))
+        self.device = QComboBox()
+        self.device.addItem("Авто (видеокарта NVIDIA, если есть)", "auto")
+        self.device.addItem("Только процессор", "cpu")
+        self.device.setCurrentIndex(max(0, self.device.findData(s.whisper_device)))
+        self.range = QComboBox()
+        self.range.addItem("Весь фильм", "all")
+        self.range.addItem(f"С позиции курсора ({fmt_clock(cursor)}) до конца", "cursor")
+        self.range.addItem("5 минут от курсора — для пробы", "5min")
+        self.max_len = QDoubleSpinBox()
+        self.max_len.setRange(2, 20)
+        self.max_len.setSuffix(" с")
+        self.max_len.setValue(s.whisper_max_len)
+        self.max_len.setToolTip("Длинные фразы делятся на реплики по знакам препинания и паузам")
+        self.replace = QCheckBox("Заменить реплики в выбранном диапазоне")
+        self.replace.setChecked(True)
+        self.replace.setVisible(has_lines)
+        note = QLabel("Распознанные реплики добавляются без ролей — назначьте их в таблице "
+                      "(выделите реплики → «Роль»). Модель скачивается при первом запуске.")
+        note.setWordWrap(True)
+        note.setObjectName("muted")
+
+        f = QFormLayout()
+        f.addRow("Источник звука:", self.source)
+        f.addRow("Язык речи:", self.language)
+        f.addRow("Модель:", self.model)
+        f.addRow("Устройство:", self.device)
+        f.addRow("Диапазон:", self.range)
+        f.addRow("Макс. длина реплики:", self.max_len)
+        f.addRow(self.replace)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Распознать")
+        bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
+        bb.accepted.connect(self._ok)
+        bb.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(f)
+        lay.addWidget(note)
+        lay.addWidget(bb)
+
+    def _ok(self):
+        self.s.whisper_language = self.language.currentData()
+        self.s.whisper_model = self.model.currentData()
+        self.s.whisper_device = self.device.currentData()
+        self.s.whisper_max_len = self.max_len.value()
+        self.s.save()
+        self.accept()
+
+    def time_range(self) -> tuple[float, Optional[float]]:
+        r = self.range.currentData()
+        if r == "cursor":
+            return self.cursor, None
+        if r == "5min":
+            return self.cursor, min(self.duration, self.cursor + 300) if self.duration else self.cursor + 300
+        return 0.0, None

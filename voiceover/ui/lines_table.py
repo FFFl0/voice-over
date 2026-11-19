@@ -6,22 +6,24 @@ from typing import Optional
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt,
                             Signal)
-from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import QComboBox, QStyledItemDelegate
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtWidgets import QComboBox, QStyle, QStyledItemDelegate
 
 from ..core.models import Line, Project, line_status
 from ..core.subtitles import fmt_clock, parse_ts
+from . import theme
 
 COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "Статус"]
 C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS = range(6)
 
 STATUS_TEXT = {
-    "ok": ("✔ синтез", "#2e7d32"),
-    "rec": ("● запись", "#1565c0"),
-    "none": ("— нет звука", "#c62828"),
-    "stale": ("↻ устарела", "#ef6c00"),
-    "nochar": ("? нет роли", "#757575"),
-    "off": ("выкл.", "#9e9e9e"),
+    "ok": "синтез",
+    "rec": "запись",
+    "none": "нет звука",
+    "stale": "устарела",
+    "nochar": "нет роли",
+    "off": "выкл.",
 }
 
 
@@ -114,7 +116,7 @@ class LinesModel(QAbstractTableModel):
             if c == C_TEXT:
                 return ln.text
             if c == C_STATUS:
-                return STATUS_TEXT[line_status(self.project, ln)][0]
+                return STATUS_TEXT[line_status(self.project, ln)]
         elif role == Qt.EditRole:
             if c == C_START:
                 return fmt_clock(ln.start)
@@ -127,12 +129,12 @@ class LinesModel(QAbstractTableModel):
         elif role == Qt.CheckStateRole and c == C_NUM:
             return Qt.Checked if ln.enabled else Qt.Unchecked
         elif role == Qt.ForegroundRole:
-            if c == C_STATUS:
-                return QBrush(QColor(STATUS_TEXT[line_status(self.project, ln)][1]))
-            if not ln.enabled:
-                return QBrush(QColor("#9e9e9e"))
-        elif role == Qt.DecorationRole and c == C_CHAR and ch:
-            return QColor(ch.color)
+            if not ln.enabled or c in (C_NUM, C_START, C_END):
+                return QBrush(QColor(theme.current().muted))
+        elif role == Qt.UserRole + 1:   # ключ статуса для делегата
+            return line_status(self.project, ln)
+        elif role == Qt.UserRole + 2 and ch:   # цвет роли
+            return ch.color
         elif role == Qt.ToolTipRole:
             if c == C_TEXT:
                 return ln.text + (f"\n\nЗаметка: {ln.note}" if ln.note else "")
@@ -219,3 +221,70 @@ class CharacterDelegate(QStyledItemDelegate):
 
     def setModelData(self, editor, model, index):
         model.setData(index, editor.currentData(), Qt.EditRole)
+
+
+class StatusDelegate(QStyledItemDelegate):
+    """Статус реплики — цветная «плашка»."""
+
+    def paint(self, p: QPainter, option, index):
+        self.initStyleOption(option, index)
+        option.text = ""
+        option.widget.style().drawControl(QStyle.CE_ItemViewItem, option, p, option.widget)
+        key = index.data(Qt.UserRole + 1)
+        if not key:
+            return
+        col = QColor(theme.status_colors().get(key, theme.current().muted))
+        text = STATUS_TEXT.get(key, "")
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        fm = option.fontMetrics
+        w = fm.horizontalAdvance(text) + 30
+        r = QRectF(option.rect.left() + 6, option.rect.center().y() - 9, w, 18)
+        bg = QColor(col)
+        bg.setAlpha(45)
+        path = QPainterPath()
+        path.addRoundedRect(r, 9, 9)
+        p.fillPath(path, bg)
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        p.drawEllipse(QRectF(r.left() + 9, r.center().y() - 3, 6, 6))
+        p.setPen(QPen(col))
+        p.drawText(r.adjusted(20, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
+        p.restore()
+
+
+class RoleDelegate(QStyledItemDelegate):
+    """Колонка персонажа: цветная точка + имя; редактор — выпадающий список."""
+
+    def __init__(self, model: "LinesModel", parent=None):
+        super().__init__(parent)
+        self.model = model
+        self._combo = CharacterDelegate(model, parent)
+
+    def paint(self, p: QPainter, option, index):
+        self.initStyleOption(option, index)
+        name = option.text
+        option.text = ""
+        option.widget.style().drawControl(QStyle.CE_ItemViewItem, option, p, option.widget)
+        color = index.data(Qt.UserRole + 2)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        x = option.rect.left() + 8
+        if color:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            p.drawEllipse(QRectF(x, option.rect.center().y() - 4, 8, 8))
+        selected = bool(option.state & QStyle.State_Selected)
+        p.setPen(option.palette.color(QPalette.HighlightedText if selected else QPalette.Text))
+        p.drawText(option.rect.adjusted(22, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                   option.fontMetrics.elidedText(name, Qt.ElideRight, option.rect.width() - 26))
+        p.restore()
+
+    def createEditor(self, parent, option, index):
+        return self._combo.createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        self._combo.setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        self._combo.setModelData(editor, model, index)
