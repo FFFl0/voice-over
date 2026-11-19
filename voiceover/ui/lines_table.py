@@ -7,7 +7,7 @@ from typing import Optional
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt,
                             Signal)
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette
 from PySide6.QtWidgets import QComboBox, QStyle, QStyledItemDelegate
 
 from ..core.models import Line, Project, line_status
@@ -131,6 +131,8 @@ class LinesModel(QAbstractTableModel):
         elif role == Qt.ForegroundRole:
             if not ln.enabled or c in (C_NUM, C_START, C_END):
                 return QBrush(QColor(theme.current().muted))
+        elif role == Qt.FontRole and c in (C_NUM, C_START, C_END):
+            return theme.body_font(theme.TEXT_SM, tabular=True)
         elif role == Qt.UserRole + 1:   # ключ статуса для делегата
             return line_status(self.project, ln)
         elif role == Qt.UserRole + 2 and ch:   # цвет роли
@@ -224,7 +226,7 @@ class CharacterDelegate(QStyledItemDelegate):
 
 
 class StatusDelegate(QStyledItemDelegate):
-    """Статус реплики — цветная «плашка»."""
+    """Статус реплики — слово цвета состояния, без плашек и точек."""
 
     def paint(self, p: QPainter, option, index):
         self.initStyleOption(option, index)
@@ -233,23 +235,11 @@ class StatusDelegate(QStyledItemDelegate):
         key = index.data(Qt.UserRole + 1)
         if not key:
             return
-        col = QColor(theme.status_colors().get(key, theme.current().muted))
-        text = STATUS_TEXT.get(key, "")
         p.save()
-        p.setRenderHint(QPainter.Antialiasing)
-        fm = option.fontMetrics
-        w = fm.horizontalAdvance(text) + 30
-        r = QRectF(option.rect.left() + 6, option.rect.center().y() - 9, w, 18)
-        bg = QColor(col)
-        bg.setAlpha(45)
-        path = QPainterPath()
-        path.addRoundedRect(r, 9, 9)
-        p.fillPath(path, bg)
-        p.setPen(Qt.NoPen)
-        p.setBrush(col)
-        p.drawEllipse(QRectF(r.left() + 9, r.center().y() - 3, 6, 6))
-        p.setPen(QPen(col))
-        p.drawText(r.adjusted(20, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
+        p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
+        p.setPen(QColor(theme.status_colors().get(key, theme.current().muted)))
+        p.drawText(option.rect.adjusted(8, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                   STATUS_TEXT.get(key, ""))
         p.restore()
 
 
@@ -268,12 +258,9 @@ class RoleDelegate(QStyledItemDelegate):
         option.widget.style().drawControl(QStyle.CE_ItemViewItem, option, p, option.widget)
         color = index.data(Qt.UserRole + 2)
         p.save()
-        p.setRenderHint(QPainter.Antialiasing)
         x = option.rect.left() + 8
-        if color:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(color))
-            p.drawEllipse(QRectF(x, option.rect.center().y() - 4, 8, 8))
+        if color:   # квадратный ключ цвета роли, как на таймлайне
+            p.fillRect(QRectF(x, option.rect.center().y() - 4, 8, 8), QColor(color))
         selected = bool(option.state & QStyle.State_Selected)
         p.setPen(option.palette.color(QPalette.HighlightedText if selected else QPalette.Text))
         p.drawText(option.rect.adjusted(22, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,

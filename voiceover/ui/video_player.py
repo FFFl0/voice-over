@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QSlider,
@@ -24,7 +24,6 @@ class VideoPlayer(QWidget):
         self.player.setAudioOutput(self.audio)
         self.video = QVideoWidget(self)
         self.video.setMinimumSize(320, 180)
-        self.video.setStyleSheet("background:#000")
         self.video.setObjectName("videoArea")
         self.player.setVideoOutput(self.video)
 
@@ -45,9 +44,14 @@ class VideoPlayer(QWidget):
         self.vol_icon = QLabel()
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
-        self.time_lbl = QLabel("00:00.000 / 00:00.000")
-        self.time_lbl.setMinimumWidth(170)
-        self.time_lbl.setStyleSheet("font-family: Consolas, 'DejaVu Sans Mono', monospace;")
+        # Тайм-код — фигура в широком светлом срезе, длительность рядом обычной шириной
+        self.time_lbl = QLabel("00:00.000")
+        self.time_lbl.setObjectName("timecode")
+        self.time_lbl.setFont(theme.display_font(theme.TEXT_XL, tabular=True))
+        self.time_lbl.setMinimumWidth(150)
+        self.dur_lbl = QLabel("из 00:00.000")
+        self.dur_lbl.setObjectName("muted")
+        self.dur_lbl.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
         self.sound = QComboBox()
         self.sound.addItems(["Звук: оригинал", "Звук: озвучка (превью)", "Без звука"])
         self.sound.setToolTip("Что слышно при воспроизведении. Превью собирается кнопкой "
@@ -57,20 +61,25 @@ class VideoPlayer(QWidget):
         self.vol.setValue(80)
         self.vol.setFixedWidth(90)
 
-        ctl = QHBoxLayout()
-        ctl.setContentsMargins(8, 6, 8, 6)
+        transport = QWidget()
+        transport.setObjectName("transport")
+        ctl = QHBoxLayout(transport)
+        ctl.setContentsMargins(12, 8, 12, 8)
         ctl.setSpacing(6)
+        ctl.addWidget(self.time_lbl)
+        ctl.addWidget(self.dur_lbl)
+        ctl.addSpacing(12)
         for w in (self.btn_back, self.btn_play, self.btn_fwd):
             ctl.addWidget(w)
         ctl.addWidget(self.slider, 1)
-        ctl.addWidget(self.time_lbl)
+        ctl.addSpacing(8)
         ctl.addWidget(self.sound)
         ctl.addWidget(self.vol_icon)
         ctl.addWidget(self.vol)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.video, 1)
-        lay.addLayout(ctl)
+        lay.addWidget(transport)
 
         self.btn_play.clicked.connect(self.toggle)
         self.btn_back.clicked.connect(lambda: self.seek(self.position() - 5))
@@ -90,7 +99,8 @@ class VideoPlayer(QWidget):
         self.btn_back.setIcon(theme.icon("back"))
         self.btn_fwd.setIcon(theme.icon("fwd"))
         self.btn_play.setIcon(theme.icon("pause" if self.is_playing() else "play"))
-        self.btn_play.setIconSize(self.btn_play.iconSize() * 1.2)
+        self.btn_play.setIconSize(QSize(24, 24))
+        self.time_lbl.setFont(theme.display_font(theme.TEXT_XL, tabular=True))
         self.vol_icon.setPixmap(theme.icon("volume", theme.current().muted).pixmap(18, 18))
 
     # ------------------------------------------------------------ API
@@ -158,7 +168,8 @@ class VideoPlayer(QWidget):
         sec = ms / 1000
         if not self.slider.isSliderDown():
             self.slider.setValue(ms)
-        self.time_lbl.setText(f"{fmt_clock(sec)} / {fmt_clock(self.duration())}")
+        self.time_lbl.setText(fmt_clock(sec))
+        self.dur_lbl.setText(f"из {fmt_clock(self.duration())}")
         if self._stop_at is not None and sec >= self._stop_at:
             self._stop_at = None
             self.player.pause()
