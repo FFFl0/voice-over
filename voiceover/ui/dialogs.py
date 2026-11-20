@@ -224,6 +224,15 @@ class MixPanel(QWidget):
         self.normalize = QCheckBox("Выравнивать громкость реплик")
         self.speed = self._spin(1.0, 2.0, "×", "Максимальное ускорение реплики, чтобы она "
                                                "уложилась в тайминг", 0.05)
+        self.fit = QCheckBox("Подгонять длинные реплики темпом синтеза")
+        self.fit.setToolTip("Если синтезированная реплика длиннее своего времени, она озвучивается "
+                            "заново быстрее — это звучит естественнее, чем ускорение готового звука")
+        self.boost = QDoubleSpinBox()
+        self.boost.setRange(0, 100)
+        self.boost.setDecimals(0)
+        self.boost.setSuffix(" %")
+        self.boost.setToolTip("Насколько можно ускорить темп синтеза для подгонки")
+        self.boost.valueChanged.connect(self._save)
         self.bg_status = QLabel()
         self.bg_status.setWordWrap(True)
         f = QFormLayout(self)
@@ -236,8 +245,11 @@ class MixPanel(QWidget):
         f.addRow("Громкость голосов:", self.voices)
         f.addRow(self.normalize)
         f.addRow("Макс. ускорение:", self.speed)
+        f.addRow(self.fit)
+        f.addRow("Ускорение темпа до:", self.boost)
         self.mode.currentIndexChanged.connect(self._save)
         self.normalize.toggled.connect(self._save)
+        self.fit.toggled.connect(self._save)
         self.setEnabled(False)
 
     def _spin(self, lo, hi, suffix, tip, step=1.0):
@@ -262,6 +274,8 @@ class MixPanel(QWidget):
         self.voices.setValue(mix.voices_db)
         self.normalize.setChecked(mix.normalize_voices)
         self.speed.setValue(mix.max_speedup)
+        self.fit.setChecked(mix.fit_by_rate)
+        self.boost.setValue(mix.max_rate_boost)
         self.mix = mix
         self.set_background_status(has_background)
         self._update()
@@ -297,6 +311,9 @@ class MixPanel(QWidget):
         m.voices_db = self.voices.value()
         m.normalize_voices = self.normalize.isChecked()
         m.max_speedup = self.speed.value()
+        m.fit_by_rate = self.fit.isChecked()
+        m.max_rate_boost = int(self.boost.value())
+        self.boost.setEnabled(m.fit_by_rate)
         self._update()
         if self.on_change:
             self.on_change()

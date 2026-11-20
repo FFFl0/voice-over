@@ -121,6 +121,8 @@ class MixSettings:
     voices_db: float = 0.0        # общая громкость голосов
     normalize_voices: bool = True  # выравнивать громкость реплик
     max_speedup: float = 1.35     # максимум ускорения реплики, чтобы влезла в тайминг
+    fit_by_rate: bool = True      # длинные реплики пересинтезировать с более быстрым темпом
+    max_rate_boost: int = 40      # насколько можно ускорить темп синтеза, %
     sample_rate: int = 48000
 
     def to_dict(self) -> dict:
