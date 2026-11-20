@@ -194,6 +194,20 @@ def _tnum(f: QFont) -> None:
         pass
 
 
+def _arrow_svg(t, direction: str, disabled: bool = False) -> str:
+    """Стрелка для списков и счётчиков: QSS принимает картинку только файлом."""
+    from ..core.settings import data_dir
+    col = t.muted if disabled else t.ink
+    path = data_dir() / "theme" / f"arrow_{direction}_{col.strip('#')}.svg"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        d = "M6 9l6 6 6-6" if direction == "down" else "M6 15l6-6 6 6"
+        path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+                        f'stroke="{col}" stroke-width="2.4" stroke-linecap="round" '
+                        f'stroke-linejoin="round"><path d="{d}"/></svg>', encoding="utf-8")
+    return path.as_posix()
+
+
 def _qss(t: Theme) -> str:
     sel_text = t.ink
     return STAMP + f"""
@@ -248,7 +262,19 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
 QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.focus}; }}
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled,
 QPlainTextEdit:disabled {{ color: {t.muted}; border-color: {t.rule}; }}
-QComboBox::drop-down {{ border: 0; width: 22px; }}
+QComboBox::drop-down {{ border: 0; width: 26px; subcontrol-origin: padding; subcontrol-position: center right; }}
+QComboBox::down-arrow {{ image: url({_arrow_svg(t, "down")}); width: 12px; height: 12px; }}
+QComboBox::down-arrow:disabled {{ image: url({_arrow_svg(t, "down", True)}); }}
+QComboBox::down-arrow:on {{ image: url({_arrow_svg(t, "up")}); }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({_arrow_svg(t, "up")}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({_arrow_svg(t, "down")}); width: 10px; height: 10px; }}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {{ image: url({_arrow_svg(t, "up", True)}); }}
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{ image: url({_arrow_svg(t, "down", True)}); }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 22px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 20px; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 20px; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::up-button:hover,
+QDoubleSpinBox::down-button:hover {{ background: {t.paper3}; }}
 QComboBox QAbstractItemView {{ background: {t.paper2}; border: 1px solid {t.rule}; border-radius: {RADIUS_SM}px; padding: 4px;
     selection-background-color: {t.paper3}; selection-color: {t.ink}; }}
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button,
