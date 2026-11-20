@@ -79,7 +79,7 @@ def _check_svg(t: Theme) -> str:
 def _arrow_svg(t, direction: str, disabled: bool = False) -> str:
     """Стрелка для списков и счётчиков: QSS принимает картинку только файлом."""
     from ..core.settings import data_dir
-    col = t.muted if disabled else t.ink
+    col = t.muted if disabled else t.text
     path = data_dir() / "theme" / f"arrow_{direction}_{col.strip('#')}.svg"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
