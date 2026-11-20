@@ -129,9 +129,11 @@ def separate_vocals(in_wav: str, out_background: str, out_vocals: Optional[str] 
     def resample(x: np.ndarray, a: int, b: int) -> np.ndarray:
         if a == b:
             return x
-        import torchaudio.functional as F  # demucs зависит от torchaudio
+        # julius (зависимость demucs, чистый PyTorch) вместо torchaudio: бинарная библиотека
+        # torchaudio часто не загружается, если её версия не совпадает с версией PyTorch
+        import julius
         t = torch.from_numpy(np.ascontiguousarray(x.T))
-        return F.resample(t, a, b).numpy().T
+        return julius.resample_frac(t, a, b).numpy().T
 
     def vocals_fn(x: np.ndarray, sr: int) -> np.ndarray:
         wav = torch.from_numpy(np.ascontiguousarray(resample(x, sr, msr).T)).to(dev)

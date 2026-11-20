@@ -339,16 +339,21 @@ class NllbLocal:
         import os
         threads = max(1, (os.cpu_count() or 4) // 2)
         self.model = None
-        if device in ("auto", "cuda"):
+        self._dir, self._threads = str(d), threads
+        from .gpu import cuda_usable
+        if device == "cuda" or (device == "auto" and cuda_usable()):
             try:
-                if ctranslate2.get_cuda_device_count() > 0:
-                    self.model = ctranslate2.Translator(str(d), device="cuda",
-                                                        compute_type="int8_float16")
+                self.model = ctranslate2.Translator(str(d), device="cuda",
+                                                    compute_type="int8_float16")
             except Exception:  # noqa: BLE001  нет CUDA/cuDNN — на процессоре
                 self.model = None
         if self.model is None:
-            self.model = ctranslate2.Translator(str(d), device="cpu", compute_type="int8",
-                                                intra_threads=threads)
+            self._use_cpu()
+
+    def _use_cpu(self):
+        import ctranslate2
+        self.model = ctranslate2.Translator(self._dir, device="cpu", compute_type="int8",
+                                            intra_threads=self._threads)
 
     def _src_code(self, text: str) -> str:
         lang = self.source if self.source in NLLB_CODES else detect_lang(text)
@@ -359,9 +364,18 @@ class NllbLocal:
             return []
         tgt = NLLB_CODES[self.target]
         sources = [[self._src_code(t)] + self.sp.encode(t, out_type=str) + ["</s>"] for t in texts]
-        res = self.model.translate_batch(sources, target_prefix=[[tgt]] * len(texts),
-                                         beam_size=4, max_decoding_length=256,
-                                         max_batch_size=self.batch_size)
+        def run():
+            return self.model.translate_batch(sources, target_prefix=[[tgt]] * len(texts),
+                                              beam_size=4, max_decoding_length=256,
+                                              max_batch_size=self.batch_size)
+        try:
+            res = run()
+        except Exception as e:  # noqa: BLE001
+            from .gpu import is_cuda_error
+            if not is_cuda_error(e):
+                raise
+            self._use_cpu()          # библиотеки CUDA не загрузились — переводим на процессоре
+            res = run()
         out = []
         for r in res:
             toks = [t for t in r.hypotheses[0] if t != tgt]

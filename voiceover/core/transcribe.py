@@ -125,12 +125,11 @@ def segments_to_lines(segments: Iterable[Segment], max_len: float = 7.0,
 
 def _load_model(model_name: str, device: str, download_root: str):
     from faster_whisper import WhisperModel
-    if device in ("auto", "cuda"):
+    from .gpu import cuda_usable
+    if device == "cuda" or (device == "auto" and cuda_usable()):
         try:
-            import ctranslate2
-            if ctranslate2.get_cuda_device_count() > 0:
-                return WhisperModel(model_name, device="cuda", compute_type="float16",
-                                    download_root=download_root)
+            return WhisperModel(model_name, device="cuda", compute_type="float16",
+                                download_root=download_root)
         except Exception:  # noqa: BLE001  нет CUDA/cuDNN — работаем на процессоре
             if device == "cuda":
                 raise
@@ -171,19 +170,35 @@ def transcribe(wav_path: str, model_name: str = "large-v3-turbo", language: Opti
         if progress:
             progress(0.0, f"Загрузка модели Whisper {model_name} (при первом запуске скачивается)…")
         model = _load_model(model_name, device, download_root or None)
-    seg_iter, info = model.transcribe(
-        audio, language=language, task="transcribe", beam_size=5, word_timestamps=True,
-        vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
-        condition_on_previous_text=False)
-    segs: list[Segment] = []
-    for s in seg_iter:
-        if cancel and cancel():
-            raise Cancelled()
-        words = [Word(w.start, w.end, w.word) for w in (getattr(s, "words", None) or [])]
-        segs.append(Segment(s.start, s.end, s.text, words,
-                            getattr(s, "no_speech_prob", 0.0), getattr(s, "avg_logprob", 0.0)))
-        if progress and total:
-            progress(min(1.0, s.end / total),
-                     f"Распознавание: {s.end / 60:.1f} / {total / 60:.1f} мин — {s.text.strip()[:40]}")
+    def run(m):
+        seg_iter, info = m.transcribe(
+            audio, language=language, task="transcribe", beam_size=5, word_timestamps=True,
+            vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
+            condition_on_previous_text=False)
+        segs: list[Segment] = []
+        for s in seg_iter:
+            if cancel and cancel():
+                raise Cancelled()
+            words = [Word(w.start, w.end, w.word) for w in (getattr(s, "words", None) or [])]
+            segs.append(Segment(s.start, s.end, s.text, words,
+                                getattr(s, "no_speech_prob", 0.0), getattr(s, "avg_logprob", 0.0)))
+            if progress and total:
+                progress(min(1.0, s.end / total),
+                         f"Распознавание: {s.end / 60:.1f} / {total / 60:.1f} мин — {s.text.strip()[:40]}")
+        return segs, info
+
+    from .gpu import is_cuda_error
+    try:
+        segs, info = run(model)
+    except Cancelled:
+        raise
+    except Exception as e:  # noqa: BLE001
+        # Видеокарта есть, но библиотек CUDA нет или они не подходят — повторяем на процессоре
+        if device == "cuda" or not is_cuda_error(e) or model_name is None:
+            raise
+        if progress:
+            progress(0.0, "Видеокарта недоступна (нет библиотек CUDA) — распознавание на процессоре…")
+        model = _load_model(model_name, "cpu", download_root or None)
+        segs, info = run(model)
     lang = getattr(info, "language", language or "")
     return segments_to_lines(segs, max_len, offset=t_from), lang
