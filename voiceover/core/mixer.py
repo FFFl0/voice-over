@@ -12,7 +12,7 @@ import numpy as np
 import soundfile as sf
 
 from . import ffmpeg
-from .models import Line, LineSource, MixMode, Project, line_status
+from .models import Line, MixMode, Project
 
 ProgressCb = Callable[[float, str], None]
 CancelCb = Callable[[], bool]
@@ -95,36 +95,18 @@ class Clip:
     start: float       # время начала в фильме, сек
     length: int        # длина в сэмплах
     gain: float        # итоговое линейное усиление
-    tempo: float = 1.0
 
     def end(self, sr: int) -> float:
         return self.start + self.length / sr
 
 
-def clip_source(project: Project, line: Line) -> tuple[Optional[Path], float, bool]:
-    """Файл реплики, его смещение и признак живой записи."""
-    ch = project.character(line.character_id)
+def clip_source(project: Project, line: Line) -> tuple[Optional[Path], float]:
+    """Файл записи реплики и его смещение относительно начала реплики (или None)."""
     if line.rec_path:
         p = project.resolve(line.rec_path)
         if p and p.exists():
-            return p, line.rec_offset, True
-    if ch is not None and ch.source == LineSource.RECORDING:
-        return None, 0.0, True
-    p = project.resolve(line.tts_path)
-    if p and p.exists():
-        return p, 0.0, False
-    return None, 0.0, False
-
-
-def available_time(project: Project, idx: int, lines: list[Line]) -> float:
-    """Сколько времени есть у реплики: её тайминг, плюс пауза до следующей (до 1 сек)."""
-    ln = lines[idx]
-    slot = ln.duration
-    nxt = next((x.start for x in lines[idx + 1:] if x.enabled and x.start > ln.start), None)
-    if nxt is None:
-        return slot + 1.0
-    extra = min(nxt, ln.end + 1.0) - ln.start
-    return max(slot, extra - 0.05, 0.2)
+            return p, line.rec_offset
+    return None, 0.0
 
 
 def _cache_key(*parts) -> str:
@@ -148,47 +130,24 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
         ln = lines[i]
         if progress:
             progress(k / max(1, len(todo)), f"Подготовка реплик {k + 1}/{len(todo)}")
-        src, offset, is_rec = clip_source(project, ln)
-        st = line_status(project, ln)
+        src, offset = clip_source(project, ln)
         if src is None:
             if ln.text.strip():
-                warnings.append(f"{ln.start:8.2f}s: нет звука для реплики «{ln.text[:40]}»")
+                warnings.append(f"{ln.start:8.2f}s: нет записи для реплики «{ln.text[:40]}»")
             continue
-        if st == "stale":
-            warnings.append(f"{ln.start:8.2f}s: текст/голос изменён, озвучка устарела «{ln.text[:40]}»")
         ch = project.character(ln.character_id)
         mtime = os.path.getmtime(src)
 
-        # 1) приводим к mono float32 нужной частоты и обрезаем тишину (только для TTS)
-        base = cache / f"b_{_cache_key(src, mtime, sr, is_rec)}.wav"
-        if not base.exists():
-            tmp = base.with_suffix(".tmp.wav")
+        # приводим к mono float32 нужной частоты (запись не обрезается — сдвиг уже учтён)
+        path = cache / f"b_{_cache_key(src, mtime, sr, True)}.wav"
+        if not path.exists():
+            tmp = path.with_suffix(".tmp.wav")
             ffmpeg.convert_audio(str(src), str(tmp), sr)
             data, _ = sf.read(str(tmp), dtype="float32")
             tmp.unlink(missing_ok=True)
-            if not is_rec:
-                data = trim_silence(data, sr)
-            sf.write(str(base), data, sr, subtype="FLOAT")
-        info = sf.info(str(base))
-        dur = info.frames / sr
-        if info.frames == 0:
+            sf.write(str(path), data, sr, subtype="FLOAT")
+        if sf.info(str(path)).frames == 0:
             continue
-
-        # 2) ускоряем, если реплика не влезает в своё время
-        tempo = 1.0
-        path = base
-        if not is_rec:
-            avail = available_time(project, i, lines)
-            if dur > avail:
-                tempo = min(project.mix.max_speedup, dur / avail)
-                if tempo > 1.01:
-                    path = cache / f"t_{_cache_key(base.name, round(tempo, 3))}.wav"
-                    if not path.exists():
-                        ffmpeg.convert_audio(str(base), str(path), sr, tempo=tempo)
-                if dur / tempo > avail + 0.3:
-                    warnings.append(
-                        f"{ln.start:8.2f}s: реплика длиннее тайминга на "
-                        f"{dur / tempo - avail:.1f} с «{ln.text[:40]}»")
         data, _ = sf.read(str(path), dtype="float32")
         if data.ndim > 1:
             data = data.mean(axis=1)
@@ -199,7 +158,7 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
             r = active_rms(data, sr)
             if r > 0:
                 gain_db += float(np.clip(TARGET_RMS_DB - lin_to_db(r), -12, 18))
-        clips.append(Clip(ln.id, str(path), ln.start + offset, len(data), db_to_lin(gain_db), tempo))
+        clips.append(Clip(ln.id, str(path), ln.start + offset, len(data), db_to_lin(gain_db)))
     if progress:
         progress(1.0, "Реплики подготовлены")
     return clips, warnings

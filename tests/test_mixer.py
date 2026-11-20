@@ -2,7 +2,7 @@ import numpy as np
 import soundfile as sf
 
 from voiceover.core import mixer
-from voiceover.core.models import Line, MixMode, Project, tts_hash
+from voiceover.core.models import Line, MixMode, Project
 
 SR = 48000
 
@@ -20,11 +20,11 @@ def make_project(tmp_path):
     sf.write(d / "orig.wav", bg, SR, subtype="PCM_16")
     p.original_wav = "orig.wav"
     ch = p.add_character("A")
-    # «синтез» длиной 2 с с тишиной по краям; слот реплики — 1 с, следующая через 1.2 с
+    # запись актёра 2 с с тишиной по краям; следующая реплика без записи
     voice = np.concatenate([np.zeros(SR // 4, np.float32), tone(1.5, 800, 0.5),
                             np.zeros(SR // 4, np.float32)])
     sf.write(d / "v.wav", voice, SR)
-    ln = Line(1.0, 2.0, "раз", ch.id, tts_path="v.wav", tts_hash=tts_hash("раз", ch.tts_params()))
+    ln = Line(1.0, 2.0, "раз", ch.id, rec_path="v.wav")
     ln2 = Line(2.2, 3.0, "два", ch.id)  # без звука — предупреждение
     p.lines += [ln, ln2]
     return p
@@ -46,15 +46,14 @@ def test_render_voiceover(tmp_path):
     p = make_project(tmp_path)
     out = tmp_path / "mix.wav"
     warnings = mixer.render_project(p, str(out))
-    assert any("нет звука" in w for w in warnings)
+    assert any("нет записи" in w for w in warnings)
     y, sr = sf.read(out)
     assert sr == SR and y.shape[1] == 2 and abs(len(y) / SR - 6.0) < 0.01
     clips, _ = mixer.prepare_clips(p)
     assert len(clips) == 1
     c = clips[0]
-    # 1.56 с речи в окне 1.15 с -> ускорено, но не больше max_speedup
-    assert 1.01 < c.tempo <= p.mix.max_speedup
-    assert c.length / SR < 1.56
+    # запись идёт в микс целиком и с начала реплики: без обрезки и ускорения
+    assert abs(c.length / SR - 2.0) < 0.01 and c.start == 1.0
     # Фон приглушён под репликой: сравним уровень 100 Гц до и во время реплики
     def band_level(seg, f):
         spec = np.abs(np.fft.rfft(seg[:, 0]))

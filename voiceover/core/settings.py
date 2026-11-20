@@ -36,10 +36,6 @@ class AppSettings:
     translate_engine: str = ""      # local | google | deepl ("" — выбрать автоматически)
     nllb_size: str = "600M"
     deepl_key: str = ""
-    ocr_language: str = "en"
-    ocr_mode: str = "light"
-    ocr_fps: float = 4.0
-    ocr_region: list = field(default_factory=lambda: [0.05, 0.70, 0.90, 0.28])  # left, top, w, h
     recent: list[str] = field(default_factory=list)
 
     @classmethod

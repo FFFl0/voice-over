@@ -221,18 +221,7 @@ class MixPanel(QWidget):
         self.release = self._spin(0.0, 3, " с", "Время возврата громкости после реплики", 0.05)
         self.bg = self._spin(-40, 12, " дБ", "Громкость оригинала / фона")
         self.voices = self._spin(-30, 20, " дБ", "Общая громкость голосов")
-        self.normalize = QCheckBox("Выравнивать громкость реплик")
-        self.speed = self._spin(1.0, 2.0, "×", "Максимальное ускорение реплики, чтобы она "
-                                               "уложилась в тайминг", 0.05)
-        self.fit = QCheckBox("Подгонять длинные реплики темпом синтеза")
-        self.fit.setToolTip("Если синтезированная реплика длиннее своего времени, она озвучивается "
-                            "заново быстрее — это звучит естественнее, чем ускорение готового звука")
-        self.boost = QDoubleSpinBox()
-        self.boost.setRange(0, 100)
-        self.boost.setDecimals(0)
-        self.boost.setSuffix(" %")
-        self.boost.setToolTip("Насколько можно ускорить темп синтеза для подгонки")
-        self.boost.valueChanged.connect(self._save)
+        self.normalize = QCheckBox("Выравнивать громкость записей")
         self.bg_status = QLabel()
         self.bg_status.setWordWrap(True)
         f = QFormLayout(self)
@@ -244,12 +233,8 @@ class MixPanel(QWidget):
         f.addRow("Громкость фона:", self.bg)
         f.addRow("Громкость голосов:", self.voices)
         f.addRow(self.normalize)
-        f.addRow("Макс. ускорение:", self.speed)
-        f.addRow(self.fit)
-        f.addRow("Ускорение темпа до:", self.boost)
         self.mode.currentIndexChanged.connect(self._save)
         self.normalize.toggled.connect(self._save)
-        self.fit.toggled.connect(self._save)
         self.setEnabled(False)
 
     def _spin(self, lo, hi, suffix, tip, step=1.0):
@@ -273,9 +258,6 @@ class MixPanel(QWidget):
         self.bg.setValue(mix.background_db)
         self.voices.setValue(mix.voices_db)
         self.normalize.setChecked(mix.normalize_voices)
-        self.speed.setValue(mix.max_speedup)
-        self.fit.setChecked(mix.fit_by_rate)
-        self.boost.setValue(mix.max_rate_boost)
         self.mix = mix
         self.set_background_status(has_background)
         self._update()
@@ -310,10 +292,6 @@ class MixPanel(QWidget):
         m.background_db = self.bg.value()
         m.voices_db = self.voices.value()
         m.normalize_voices = self.normalize.isChecked()
-        m.max_speedup = self.speed.value()
-        m.fit_by_rate = self.fit.isChecked()
-        m.max_rate_boost = int(self.boost.value())
-        self.boost.setEnabled(m.fit_by_rate)
         self._update()
         if self.on_change:
             self.on_change()
@@ -687,149 +665,6 @@ class TranslateDialog(QDialog):
         self.s.deepl_key = self.key.text().strip()
         self.s.save()
         self.accept()
-
-
-# ======================================================================== OCR
-
-class OcrDialog(QDialog):
-    """Субтитры с видео: язык, область кадра с предпросмотром, диапазон."""
-
-    def __init__(self, s: AppSettings, video: str, cursor: float, duration: float,
-                 has_lines: bool, parent=None):
-        super().__init__(parent)
-        from PySide6.QtWidgets import QSpinBox
-        from ..core import ocr
-        self.s = s
-        self.video = video
-        self.cursor = cursor
-        self.duration = duration
-        self.setWindowTitle("Субтитры с видео (распознавание текста в кадре)")
-        self.setMinimumWidth(720)
-        self._frame = ocr.grab_frame(video, cursor if cursor > 0.5 else min(duration / 3, 60))
-
-        self.language = QComboBox()
-        for code, title, _ in ocr.LANGUAGES:
-            self.language.addItem(title, code)
-        self.language.setCurrentIndex(max(0, self.language.findData(s.ocr_language)))
-        self.mode = QComboBox()
-        for code, title in ocr.MODES:
-            self.mode.addItem(title, code)
-        self.mode.setCurrentIndex(max(0, self.mode.findData(s.ocr_mode)))
-        self.engine_lbl = QLabel()
-        self.engine_lbl.setWordWrap(True)
-        self.fps = QDoubleSpinBox()
-        self.fps.setRange(1, 10)
-        self.fps.setSingleStep(1)
-        self.fps.setSuffix(" кадр/с")
-        self.fps.setValue(s.ocr_fps)
-        self.fps.setToolTip("Больше — точнее тайминги, но медленнее")
-        self.region = []
-        for label, val in zip(("Слева", "Сверху", "Ширина", "Высота"), s.ocr_region):
-            sp = QSpinBox()
-            sp.setRange(0, 100)
-            sp.setSuffix(" %")
-            sp.setValue(int(round(val * 100)))
-            sp.setToolTip(f"{label}: доля кадра")
-            sp.valueChanged.connect(self._update_preview)
-            self.region.append(sp)
-        self.range = QComboBox()
-        self.range.addItem("Весь фильм", "all")
-        self.range.addItem(f"С курсора ({fmt_clock(cursor)}) до конца", "cursor")
-        self.range.addItem("2 минуты от курсора — для пробы", "2min")
-        self.replace = QCheckBox("Заменить реплики в выбранном диапазоне")
-        self.replace.setChecked(True)
-        self.replace.setVisible(has_lines)
-        self.preview = QLabel()
-        self.preview.setMinimumHeight(200)
-        self.preview.setAlignment(Qt.AlignCenter)
-
-        reg = QHBoxLayout()
-        for name, sp in zip(("слева", "сверху", "ширина", "высота"), self.region):
-            lbl = QLabel(name)
-            lbl.setObjectName("muted")
-            reg.addWidget(lbl)
-            reg.addWidget(sp)
-        f = QFormLayout()
-        f.addRow("Язык текста:", self.language)
-        f.addRow("", self.engine_lbl)
-        f.addRow("Вид субтитров:", self.mode)
-        f.addRow("Область кадра:", reg)
-        f.addRow("Частота проверки:", self.fps)
-        f.addRow("Диапазон:", self.range)
-        f.addRow(self.replace)
-        note = QLabel("Рамка на кадре показывает, где искать текст. Подберите её так, чтобы субтитры "
-                      "помещались целиком, а лишних надписей было поменьше.")
-        note.setWordWrap(True)
-        note.setObjectName("muted")
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.button(QDialogButtonBox.Ok).setText("Распознать")
-        bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
-        bb.accepted.connect(self._ok)
-        bb.rejected.connect(self.reject)
-        lay = QVBoxLayout(self)
-        lay.addWidget(self.preview)
-        lay.addWidget(note)
-        lay.addLayout(f)
-        lay.addWidget(bb)
-        self.language.currentIndexChanged.connect(self._update_engine)
-        self._update_engine()
-        self._update_preview()
-
-    def _update_engine(self, *_):
-        from ..core import ocr
-        name, hint = ocr.pick_engine(self.language.currentData())
-        if name:
-            self.engine_lbl.setText({"rapidocr": "Движок: RapidOCR (быстрый, без PyTorch)",
-                                     "easyocr": "Движок: EasyOCR"}.get(name, name))
-            self.engine_lbl.setStyleSheet(f"color:{theme.current().muted}")
-        else:
-            self.engine_lbl.setText(hint)
-            self.engine_lbl.setStyleSheet(f"color:{theme.current().danger}")
-
-    def region_values(self) -> list[float]:
-        return [sp.value() / 100 for sp in self.region]
-
-    def _update_preview(self, *_):
-        from PySide6.QtGui import QImage, QPainter, QPen, QPixmap, QColor
-        if self._frame is None:
-            self.preview.setText("Не удалось получить кадр для предпросмотра")
-            return
-        h, w, _ = self._frame.shape
-        img = QImage(self._frame.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-        pm = QPixmap.fromImage(img)
-        p = QPainter(pm)
-        left, top, rw, rh = self.region_values()
-        pen = QPen(QColor(theme.current().accent), 3)
-        p.setPen(pen)
-        p.drawRect(int(w * left), int(h * top), int(w * rw), int(h * rh))
-        p.end()
-        self.preview.setPixmap(pm.scaled(680, 383, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-    def _ok(self):
-        from ..core import ocr
-        if ocr.pick_engine(self.language.currentData())[0] is None:
-            QMessageBox.warning(self, "OCR", self.engine_lbl.text())
-            return
-        self.s.ocr_language = self.language.currentData()
-        self.s.ocr_mode = self.mode.currentData()
-        self.s.ocr_fps = self.fps.value()
-        self.s.ocr_region = self.region_values()
-        self.s.save()
-        self.accept()
-
-    def settings(self):
-        from ..core.ocr import OcrRegion, OcrSettings
-        left, top, w, h = self.region_values()
-        return OcrSettings(language=self.s.ocr_language, region=OcrRegion(left, top, w, h),
-                           fps=self.s.ocr_fps, mode=self.s.ocr_mode)
-
-    def time_range(self) -> tuple[float, Optional[float]]:
-        r = self.range.currentData()
-        if r == "cursor":
-            return self.cursor, None
-        if r == "2min":
-            return self.cursor, min(self.duration, self.cursor + 120) if self.duration else self.cursor + 120
-        return 0.0, None
 
 
 # ======================================================================== экспорт субтитров

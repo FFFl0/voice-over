@@ -9,7 +9,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QScrollBar, QVBoxLayout, QWidget
 
-from ..core.models import LineSource, Project, line_status
+from ..core.models import Project, line_status
 from . import theme
 
 RULER_H = 26
@@ -53,7 +53,7 @@ class TimelineCanvas(QWidget):
         out: list[tuple[Optional[str], str, QColor, bool]] = []
         if self.project:
             for c in self.project.characters:
-                out.append((c.id, c.name, QColor(c.color), c.source == LineSource.RECORDING))
+                out.append((c.id, c.name, QColor(c.color), False))
             if any(ln.character_id is None or self.project.character(ln.character_id) is None
                    for ln in self.project.lines):
                 out.append((None, "без роли", QColor(theme.current().muted), False))

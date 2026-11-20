@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -26,54 +25,25 @@ class MixMode(str, Enum):
     DUBBING = "dubbing"      # дубляж: оригинальные голоса удалены, остаётся фон
 
 
-class LineSource(str, Enum):
-    TTS = "tts"              # синтез речи
-    RECORDING = "recording"  # запись живого актёра
-
-
-class Engine(str, Enum):
-    EDGE = "edge"
-    SILERO = "silero"
-    PIPER = "piper"
-    VOSK = "vosk"
-
-
 def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
 @dataclass
 class Character:
+    """Персонаж (роль). Озвучивается живым актёром: реплики записываются на вкладке «Запись»."""
     name: str
     id: str = field(default_factory=new_id)
     color: str = "#63bde7"
-    source: LineSource = LineSource.TTS
-    engine: Engine = Engine.EDGE
-    voice: str = "ru-RU-DmitryNeural"
-    rate: int = 0        # скорость, % (-50..+100)
-    pitch: int = 0       # высота, Гц (-50..+50)
     volume_db: float = 0.0
-    actor: str = ""      # имя актёра озвучки (для живой записи)
-
-    def tts_params(self) -> dict:
-        return {
-            "engine": self.engine.value,
-            "voice": self.voice,
-            "rate": self.rate,
-            "pitch": self.pitch,
-        }
+    actor: str = ""      # имя актёра озвучки
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        d["source"] = self.source.value
-        d["engine"] = self.engine.value
-        return d
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Character":
-        d = dict(d)
-        d["source"] = LineSource(d.get("source", "tts"))
-        d["engine"] = Engine(d.get("engine", "edge"))
+        # старые проекты содержат настройки синтеза (engine, voice…) — они игнорируются
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in known})
 
@@ -86,9 +56,6 @@ class Line:
     character_id: Optional[str] = None
     id: str = field(default_factory=new_id)
     enabled: bool = True
-    # Синтезированный звук
-    tts_path: str = ""
-    tts_hash: str = ""
     # Запись живого актёра
     rec_path: str = ""
     rec_offset: float = 0.0  # смещение начала записи относительно start, сек
@@ -120,9 +87,6 @@ class MixSettings:
     background_db: float = 0.0    # громкость фона/оригинала
     voices_db: float = 0.0        # общая громкость голосов
     normalize_voices: bool = True  # выравнивать громкость реплик
-    max_speedup: float = 1.35     # максимум ускорения реплики, чтобы влезла в тайминг
-    fit_by_rate: bool = True      # длинные реплики пересинтезировать с более быстрым темпом
-    max_rate_boost: int = 40      # насколько можно ускорить темп синтеза, %
     sample_rate: int = 48000
 
     def to_dict(self) -> dict:
@@ -276,25 +240,12 @@ class Project:
         return p
 
 
-def tts_hash(text: str, params: dict) -> str:
-    """Ключ кэша синтеза: если текст или голос изменились — нужно пересинтезировать."""
-    raw = json.dumps({"t": text.strip(), **params}, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
 def line_status(project: Project, line: Line) -> str:
-    """Статус готовности реплики: 'off', 'rec', 'ok', 'stale', 'none', 'nochar'."""
+    """Статус готовности реплики: 'off' (выключена), 'nochar' (без роли),
+    'rec' (записана), 'none' (записи нет)."""
     if not line.enabled or not line.text.strip() and not line.rec_path:
         return "off"
-    ch = project.character(line.character_id)
-    if ch is None:
+    if project.character(line.character_id) is None:
         return "nochar"
-    if ch.source == LineSource.RECORDING or line.rec_path:
-        p = project.resolve(line.rec_path)
-        return "rec" if p and p.exists() else "none"
-    p = project.resolve(line.tts_path)
-    if not p or not p.exists():
-        return "none"
-    if line.tts_hash != tts_hash(line.text, ch.tts_params()):
-        return "stale"
-    return "ok"
+    p = project.resolve(line.rec_path)
+    return "rec" if p and p.exists() else "none"

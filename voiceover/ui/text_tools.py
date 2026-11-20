@@ -1,4 +1,4 @@
-"""Инструменты текста в главном окне: перевод реплик, возврат оригинала, субтитры с видео (OCR).
+"""Инструменты текста в главном окне: перевод реплик и возврат оригинала.
 
 Логика вынесена из main_window.py, чтобы окно только подключало действия.
 Все изменения проекта проходят через mark_dirty — их можно отменить (Ctrl+Z).
@@ -128,59 +128,3 @@ def restore_original(win: "MainWindow") -> None:
     win._on_table_selection()
     win.mark_dirty("Возврат оригинала")
     win.statusBar().showMessage(f"Возвращён оригинал у реплик: {len(lines)}", 5000)
-
-
-def run_ocr(win: "MainWindow") -> None:
-    """Распознать вшитые субтитры в кадре и добавить их как реплики."""
-    from ..core.ocr import extract_subtitles
-    from .dialogs import OcrDialog
-
-    p = win.project
-    if not p or not p.video_path:
-        return
-    dlg = OcrDialog(win.settings, p.video_path, win.player.position(), p.duration,
-                    bool(p.lines), win)
-    if dlg.exec() != QDialog.Accepted:
-        return
-    settings = dlg.settings()
-    t_from, t_to = dlg.time_range()
-    replace = dlg.replace.isChecked()
-    video = p.video_path
-
-    def work(t: Task):
-        return extract_subtitles(video, settings, None, t_from, t_to, t.report, t.is_cancelled)
-
-    def done(subs):
-        end = t_to if t_to is not None else float("inf")
-        if replace:
-            p.lines = [ln for ln in p.lines if ln.end <= t_from or ln.start >= end]
-        for sl in subs:
-            p.lines.append(Line(sl.start, sl.end, sl.text, None))
-        p.sort_lines()
-        # Язык найденного текста — источник для будущего перевода
-        lang = {"zh": "zh-CN"}.get(settings.language, settings.language)
-        win.settings.translate_source = lang
-        win.settings.save()
-        win.chars.reload()
-        win.refresh_all()
-        win.mark_dirty("Субтитры с видео")
-        win.save_project()
-        win.tabs.setCurrentIndex(0)
-        if not subs:
-            QMessageBox.information(
-                win, "Субтитры с видео",
-                "Текст в кадре не найден. Проверьте рамку области и вид субтитров "
-                "(светлые/тёмные) и попробуйте снова на пробном отрезке.")
-            return
-        target = win.settings.translate_target
-        if lang != target and QMessageBox.question(
-                win, "Субтитры с видео",
-                f"Найдено реплик: {len(subs)}.\n\nПеревести их сейчас на язык озвучки?"
-        ) == QMessageBox.Yes:
-            new_lines = [ln for ln in p.lines
-                         if any(abs(ln.start - sl.start) < 1e-6 and ln.text == sl.text for sl in subs)]
-            translate_lines(win, new_lines)
-        else:
-            win.statusBar().showMessage(f"Найдено реплик: {len(subs)}. Назначьте им роли.", 8000)
-
-    win.run_task(Task("Субтитры с видео", work), done)

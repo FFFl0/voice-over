@@ -133,7 +133,7 @@ def test_subtitle_export_dialog_flow(win, tmp_path, monkeypatch):
 def test_cast_between_episodes(win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
     from voiceover.core import cast
-    from voiceover.core.models import Engine, Line, Project
+    from voiceover.core.models import Line, Project
     from voiceover.ui import main_window as mw
     monkeypatch.setattr(cast, "library_path", lambda: tmp_path / "cast.json")
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
@@ -142,8 +142,8 @@ def test_cast_between_episodes(win, tmp_path, monkeypatch):
                         staticmethod(lambda *a, **k: ("Inazuma", True)))
     # серия 1: настроенные голоса -> состав
     ep1 = Project(path=str(tmp_path / "e1.vop"), duration=5)
-    t = ep1.add_character("Тенма", engine=Engine.PIPER, voice="ru_RU-dmitri-medium", pitch=-8)
-    ep1.add_character("Аки", engine=Engine.PIPER, voice="ru_RU-irina-medium")
+    t = ep1.add_character("Тенма", actor="Саша")
+    ep1.add_character("Аки", actor="Маша", color="#123456")
     ep1.lines = [Line(0, 1, "a", t.id)]
     win.set_project(ep1)
     win.chars.save_cast()
@@ -161,6 +161,6 @@ def test_cast_between_episodes(win, tmp_path, monkeypatch):
     monkeypatch.setattr(mw.ImportSubsDialog, "exec", lambda self: QDialog.Accepted)
     win.import_subtitles(str(srt))
     aki = ep2.character_by_name("Аки")
-    assert aki.engine == Engine.PIPER and aki.voice == "ru_RU-irina-medium"   # из состава
-    assert ep2.character_by_name("Новенький").voice != "ru_RU-irina-medium"  # не из состава
+    assert aki.actor == "Маша" and aki.color == "#123456"          # из состава
+    assert ep2.character_by_name("Новенький").actor == ""            # нет в составе
     assert "Inazuma" in win.chars.cast_lbl.text()

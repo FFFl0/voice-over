@@ -18,10 +18,8 @@ COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "
 C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS, C_ORIG = range(7)
 
 STATUS_TEXT = {
-    "ok": "синтез",
-    "rec": "запись",
-    "none": "нет звука",
-    "stale": "устарела",
+    "rec": "записано",
+    "none": "нет записи",
     "nochar": "нет роли",
     "off": "выкл.",
 }

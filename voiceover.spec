@@ -6,34 +6,17 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 full = os.environ.get("VO_FULL") == "1"
 datas = collect_data_files("imageio_ffmpeg", include_py_files=False)
 datas += [("voiceover/assets", "voiceover/assets")]  # шрифт Manrope (OFL) и значок
-hidden = collect_submodules("edge_tts")
+hidden = []
 try:  # Whisper необязателен: без него сборка проходит, распознавание просто недоступно
     import faster_whisper  # noqa: F401
     datas += collect_data_files("faster_whisper")      # VAD-модель
     hidden += collect_submodules("faster_whisper")
 except ImportError:
     pass
-try:  # Piper: словари espeak-ng внутри пакета
-    import piper  # noqa: F401
-    datas += collect_data_files("piper")
-    hidden += collect_submodules("piper")
-except ImportError:
-    pass
-try:  # Vosk TTS
-    import vosk_tts  # noqa: F401
-    hidden += collect_submodules("vosk_tts")
-except ImportError:
-    pass
-try:  # OCR (RapidOCR): модели лежат внутри пакета
-    import rapidocr_onnxruntime  # noqa: F401
-    datas += collect_data_files("rapidocr_onnxruntime")
-    hidden += collect_submodules("rapidocr_onnxruntime")
-except ImportError:
-    pass
 excludes = ["tkinter", "matplotlib", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
             "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf", "onnxruntime.training"]
 if full:
-    hidden += collect_submodules("demucs") + collect_submodules("easyocr")
+    hidden += collect_submodules("demucs")
     datas += collect_data_files("demucs")
 else:
     excludes += ["torch", "torchaudio", "demucs", "torchvision"]

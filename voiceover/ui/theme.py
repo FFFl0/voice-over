@@ -132,7 +132,7 @@ def current() -> Theme:
 
 def status_colors() -> dict[str, str]:
     t = _current
-    return {"ok": t.success, "rec": t.ink2, "none": t.error, "stale": t.warn,
+    return {"rec": t.success, "none": t.error,
             "nochar": t.muted, "off": t.muted}
 
 
@@ -414,7 +414,6 @@ _ICONS: dict[str, str] = {
     "whisper": '<rect x="9" y="3" width="6" height="11"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'
                '<path d="M2 9v4M22 9v4"/>',
     "separate": '<path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/><path d="M3 17.5 12 22l9-4.5" opacity=".5"/>',
-    "synth": '<path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/>',
     "preview": '<path d="M4 4h16v16H4z"/><path d="M10 8.5v7l5.5-3.5z"/>',
     "export": '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v8h14v-8"/>',
     "undo": '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
@@ -442,7 +441,6 @@ _ICONS: dict[str, str] = {
     "help": '<rect x="3" y="3" width="18" height="18"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/>',
     "translate": '<path d="M3 5h9M7.5 3v2M5 5c.5 3.5 3 6.5 6.5 8M10 5c-.5 3.5-3 6.5-6.5 8"/>'
                  '<path d="M13 21l4.5-10 4.5 10M14.6 17.5h5.8"/>',
-    "ocr": '<path d="M3 8V4h4M21 8V4h-4M3 16v4h4M21 16v4h-4"/><path d="M7 10h10M7 14h7"/>',
     "headphones": '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><rect x="3" y="14" width="4" height="7"/>'
                   '<rect x="17" y="14" width="4" height="7"/>',
     "refresh": '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
