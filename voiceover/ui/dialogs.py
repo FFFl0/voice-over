@@ -567,9 +567,11 @@ class TranslateDialog(QDialog):
         self.scope_all = QRadioButton(f"Все реплики ({n_total})")
         self.scope_sel.setEnabled(n_selected > 0)
         (self.scope_sel if n_selected > 1 else self.scope_all).setChecked(True)
-        self.from_orig = QCheckBox("Переводить с сохранённого оригинала, если реплика уже переведена")
-        self.from_orig.setChecked(True)
-        note = QLabel("Используется Google Переводчик (нужен интернет, ключ не нужен). Текст оригинала "
+        self.skip_done = QCheckBox("Пропускать уже переведённые реплики")
+        self.skip_done.setChecked(True)
+        self.skip_done.setToolTip("Выключите, чтобы перевести заново — с сохранённого оригинала")
+        note = QLabel("Используется Google Переводчик (нужен интернет, ключ не нужен). Реплики уходят "
+                      "крупными пачками с паузами, чтобы Google не ограничивал запросы. Текст оригинала "
                       "сохраняется в реплике, вернуть его можно через контекстное меню таблицы "
                       "или «Отменить». Озвучка переведённых реплик станет «устаревшей».")
         note.setWordWrap(True)
@@ -579,7 +581,7 @@ class TranslateDialog(QDialog):
         f.addRow("На язык:", self.target)
         f.addRow("Что переводить:", self.scope_sel)
         f.addRow("", self.scope_all)
-        f.addRow(self.from_orig)
+        f.addRow(self.skip_done)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Перевести")
         bb.button(QDialogButtonBox.Ok).setProperty("primary", True)

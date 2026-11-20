@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 
 def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> None:
     """Перевести реплики. lines=None — спросить в диалоге (выделенные или все)."""
-    from ..core.translate import google_translator, translate_texts, translator_available
+    from ..core.translate import (PartialTranslation, google_translator, translate_texts,
+                                  translator_available)
     from .dialogs import TranslateDialog
 
     p = win.project
@@ -30,31 +31,51 @@ def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> No
         QMessageBox.warning(win, "Перевод", why)
         return
     selected = win.selected_lines()
+    skip_done = True
     if lines is None:
         dlg = TranslateDialog(win.settings, len(selected), len(p.lines), win)
         if dlg.exec() != QDialog.Accepted:
             return
         lines = selected if dlg.scope_sel.isChecked() else list(p.lines)
-        from_orig = dlg.from_orig.isChecked()
-    else:
-        from_orig = True
-    lines = [ln for ln in lines if (ln.orig_text if from_orig and ln.orig_text else ln.text).strip()]
+        skip_done = dlg.skip_done.isChecked()
+    total_asked = len(lines)
+    if skip_done:
+        lines = [ln for ln in lines if not ln.orig_text]
+    # уже переведённые (если не пропускаем) переводятся заново — с оригинала
+    lines = [ln for ln in lines if (ln.orig_text or ln.text).strip()]
     if not lines:
-        win.statusBar().showMessage("Нет реплик с текстом для перевода", 5000)
+        win.statusBar().showMessage(
+            "Все выбранные реплики уже переведены" if total_asked else "Нет реплик для перевода", 6000)
         return
     src, dst = win.settings.translate_source, win.settings.translate_target
-    sources = [ln.orig_text if (from_orig and ln.orig_text) else ln.text for ln in lines]
+    sources = [ln.orig_text or ln.text for ln in lines]
     ids = [ln.id for ln in lines]
+    state = {"frac": 0.0, "applied": 0, "error": ""}
 
     def work(t: Task):
-        return translate_texts(sources, google_translator(src, dst), t.report, t.is_cancelled)
+        def prog(f, text):
+            state["frac"] = f
+            t.report(f, text)
 
-    def done(result: list[str]):
+        def on_wait(sec):
+            t.report(state["frac"], f"Google просит подождать: пауза {sec:.0f} с, затем перевод продолжится")
+
+        tr = google_translator(src, dst, on_wait=on_wait, cancel=t.is_cancelled)
+        try:
+            result = translate_texts(sources, tr, prog, t.is_cancelled)
+            t.emit((result, [True] * len(result), ""))
+        except PartialTranslation as e:
+            # готовые реплики применяются и при ошибке, и при отмене
+            t.emit((e.result, e.done, "" if t.is_cancelled() else str(e)))
+        return True
+
+    def apply(msg):
+        result, done_mask, err = msg
         by_id = {ln.id: ln for ln in p.lines}
         changed = 0
-        for lid, src_text, new in zip(ids, sources, result):
+        for lid, src_text, new, ok_ in zip(ids, sources, result, done_mask):
             ln = by_id.get(lid)
-            if ln is None or not new:
+            if ln is None or not ok_ or not new:
                 continue
             if not ln.orig_text:
                 ln.orig_text = src_text
@@ -62,14 +83,26 @@ def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> No
             if ln.text != new:
                 ln.text = new
                 changed += 1
+        state["applied"] = changed
+        state["error"] = err
         win.refresh_all()
         win._on_table_selection()
-        win.mark_dirty("Перевод реплик")
-        win.save_project()
-        win.statusBar().showMessage(
-            f"Переведено реплик: {changed}. Оригинал сохранён; Ctrl+Z — отменить перевод.", 8000)
+        if changed:
+            win.mark_dirty("Перевод реплик")
+            win.save_project()
+        left = len(ids) - sum(1 for m in done_mask if m)
+        if err:
+            QMessageBox.warning(
+                win, "Перевод",
+                f"Переведено реплик: {changed} из {len(ids)}.\n\n{err}\n\n"
+                f"Осталось: {left}. Запустите перевод ещё раз — уже переведённые будут пропущены.")
+        elif left:
+            win.statusBar().showMessage(f"Перевод остановлен: готово {changed}, осталось {left}", 8000)
+        else:
+            win.statusBar().showMessage(
+                f"Переведено реплик: {changed}. Оригинал сохранён; Ctrl+Z — отменить перевод.", 8000)
 
-    win.run_task(Task(f"Перевод ({len(lines)} реплик)", work), done)
+    win.run_task(Task(f"Перевод ({len(lines)} реплик)", work), None, apply)
 
 
 def restore_original(win: "MainWindow") -> None:
