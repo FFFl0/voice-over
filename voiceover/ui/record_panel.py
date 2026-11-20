@@ -58,9 +58,11 @@ class RecordPanel(QWidget):
         self.mute_video.setToolTip("Включите, если пишете без наушников, чтобы оригинал не попал в микрофон")
 
         self.prev_lbl = QLabel()
+        self.prev_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.prev_lbl.setObjectName("muted")
         self.prev_lbl.setWordWrap(True)
         self.who = QLabel()
+        self.who.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.who.setObjectName("itemTitle")
         self.when = QLabel()
         self.when.setObjectName("muted")
@@ -69,14 +71,17 @@ class RecordPanel(QWidget):
         self.length.setObjectName("muted")
         self.length.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
         self.note = QLabel()
+        self.note.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.note.setObjectName("muted")
         self.note.setWordWrap(True)
         self.prompt = QLabel("Выберите реплику в таблице")
+        self.prompt.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.prompt.setObjectName("promptText")
         self.prompt.setWordWrap(True)
         self.prompt.setMinimumHeight(110)
         self.prompt.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.next_lbl = QLabel()
+        self.next_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.next_lbl.setObjectName("muted")
         self.next_lbl.setWordWrap(True)
         # Отсчёт — метр (2 px): до начала реплики заполняется преролл, затем сама реплика
@@ -104,6 +109,7 @@ class RecordPanel(QWidget):
         self.offset.setSuffix(" с")
         self.offset.setToolTip("Сдвиг записи относительно начала реплики (подгонка синхрона)")
         self.take_lbl = QLabel()
+        self.take_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
 
         form = QFormLayout()
         dev_row = QHBoxLayout()

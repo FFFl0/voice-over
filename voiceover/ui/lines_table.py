@@ -146,7 +146,9 @@ class LinesModel(QAbstractTableModel):
                 tip = ln.text
                 if ln.orig_text:
                     tip += f"\n\nОригинал: {ln.orig_text}"
-                return tip + (f"\n\nЗаметка: {ln.note}" if ln.note else "")
+                tip += f"\n\nЗаметка: {ln.note}" if ln.note else ""
+                from html import escape   # подсказка Qt распознаёт HTML — показываем как текст
+                return "<qt>" + escape(tip).replace("\n", "<br>") + "</qt>"
             if c == C_NUM:
                 return "Снимите галочку, чтобы исключить реплику из озвучки"
         elif role == Qt.UserRole:

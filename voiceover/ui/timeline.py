@@ -321,8 +321,9 @@ class TimelineCanvas(QWidget):
                            (Qt.PointingHandCursor if ln else Qt.ArrowCursor))
             if ln:
                 ch = self.project.character(ln.character_id) if self.project else None
-                self.setToolTip(f"<b>{ch.name if ch else 'без роли'}</b> "
-                                f"{ln.start:.2f}–{ln.end:.2f} с<br>{ln.text}")
+                from html import escape
+                self.setToolTip(f"<b>{escape(ch.name) if ch else 'без роли'}</b> "
+                                f"{ln.start:.2f}–{ln.end:.2f} с<br>{escape(ln.text)}")
             else:
                 self.setToolTip("")
             return

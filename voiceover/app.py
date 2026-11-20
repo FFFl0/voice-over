@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
+
 
 def ensure_std_streams() -> None:
     """Без консоли (pythonw.exe, собранный .exe) sys.stdout/sys.stderr равны None, и любая
@@ -17,8 +19,7 @@ def ensure_std_streams() -> None:
     if sys.stdout is not None and sys.stderr is not None:
         return
     try:
-        from .core.settings import data_dir
-        log = open(data_dir() / "voiceover.log", "a", encoding="utf-8", buffering=1)
+        log = open(log_path(), "a", encoding="utf-8", buffering=1)
     except Exception:  # noqa: BLE001
         log = open(os.devnull, "w", encoding="utf-8")
     if sys.stdout is None:
@@ -27,8 +28,60 @@ def ensure_std_streams() -> None:
         sys.stderr = log
 
 
+def log_path() -> Path:
+    from .core.settings import data_dir
+    return data_dir() / "voiceover.log"
+
+
+def write_log(text: str) -> None:
+    import datetime
+    try:
+        with open(log_path(), "a", encoding="utf-8") as f:
+            f.write(f"\n[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {text}\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_in_hook = False
+
+
+def install_excepthook() -> None:
+    """Непредвиденная ошибка в интерфейсе: подробности — в журнал, пользователю — окно,
+    а не молчаливо «ничего не происходит» (без консоли ошибку иначе не видно)."""
+    import threading
+    import traceback
+
+    def hook(exc_type, exc, tb):
+        global _in_hook
+        details = "".join(traceback.format_exception(exc_type, exc, tb))
+        write_log(details)
+        try:
+            sys.__stderr__ and sys.__stderr__.write(details)
+        except Exception:  # noqa: BLE001
+            pass
+        if _in_hook or issubclass(exc_type, KeyboardInterrupt):
+            return
+        _in_hook = True
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance() is not None:
+                box = QMessageBox(QMessageBox.Critical, "Непредвиденная ошибка",
+                                  f"{exc_type.__name__}: {exc}\n\nРабота программы продолжится. "
+                                  f"Подробности записаны в журнал:\n{log_path()}")
+                box.setTextFormat(Qt.PlainText)
+                box.setDetailedText(details)
+                box.exec()
+        finally:
+            _in_hook = False
+
+    sys.excepthook = hook
+    threading.excepthook = lambda a: write_log(
+        "".join(traceback.format_exception(a.exc_type, a.exc_value, a.exc_traceback)))
+
+
 def main(argv: list[str] | None = None) -> int:
     ensure_std_streams()
+    install_excepthook()
     argv = list(sys.argv if argv is None else argv)
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication

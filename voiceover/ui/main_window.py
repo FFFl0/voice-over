@@ -82,8 +82,10 @@ class MainWindow(QMainWindow):
         self.now_bar = QFrame()
         self.now_bar.setObjectName("cue")
         self.cue_who = QLabel()
+        self.cue_who.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.cue_who.setObjectName("cueWho")
         self.now_lbl = QLabel()
+        self.now_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.now_lbl.setObjectName("cueText")
         self.now_lbl.setWordWrap(True)
         self.now_lbl.setMinimumHeight(56)
@@ -175,6 +177,7 @@ class MainWindow(QMainWindow):
         self.text_edit.setPlaceholderText("Текст выделенной реплики")
         self.text_edit.setMaximumHeight(72)
         self.orig_lbl = QLabel()
+        self.orig_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.orig_lbl.setObjectName("muted")
         self.orig_lbl.setWordWrap(True)
         self.orig_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -263,6 +266,7 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 1000)
         self.progress.hide()
         self.progress_lbl = QLabel()
+        self.progress_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.cancel_btn = QToolButton(text="Отмена")
         self.cancel_btn.hide()
         self.cancel_btn.clicked.connect(self.cancel_task)
@@ -1445,6 +1449,10 @@ class MainWindow(QMainWindow):
         if Path(out).resolve() == Path(p.video_path).resolve():
             QMessageBox.warning(self, "Экспорт", "Нельзя перезаписать исходное видео.")
             return
+        if Path(out).exists() and QMessageBox.question(
+                self, "Экспорт", f"Файл уже существует:\n{out}\n\nЗаменить его?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
         mix_wav = str(p.project_dir / "mix.wav")
 
         def work(t: Task):
@@ -1471,6 +1479,7 @@ class MainWindow(QMainWindow):
         dlg.resize(640, 420 if items else 140)
         lay = QVBoxLayout(dlg)
         lbl = QLabel(text)
+        lbl.setTextFormat(Qt.PlainText)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(lbl)
         if items:

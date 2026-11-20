@@ -1,0 +1,100 @@
+"""Интерфейс: текст реплик не исполняется как HTML, ошибки видны, экспорт не затирает молча."""
+import os
+import sys
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PySide6.QtWidgets")
+
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def win(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    from voiceover.core.settings import AppSettings
+    from voiceover.ui import theme
+    from voiceover.ui.main_window import MainWindow
+    theme.apply_theme(app, "dark")
+    w = MainWindow(AppSettings())
+    yield w
+    w.dirty = False
+    w.close()
+
+
+HTML = '<img src="file:///etc/passwd"><b style="font-size:60pt">жирный</b>'
+
+
+def test_line_text_is_plain(win, tmp_path):
+    from voiceover.core.models import Line, Project
+    p = Project(path=str(tmp_path / "p.vop"), duration=10)
+    c = p.add_character("<i>Имя</i>")
+    p.lines = [Line(0, 2, HTML, c.id)]
+    win.set_project(p)
+    win._update_now_line(1.0)
+    assert win.now_lbl.textFormat() == Qt.PlainText and win.now_lbl.text() == HTML
+    assert win.cue_who.textFormat() == Qt.PlainText
+    win.select_line(p.lines[0].id)
+    assert win.record.prompt.textFormat() == Qt.PlainText
+    tip = win.lines_model.data(win.lines_model.index(0, 4), Qt.ToolTipRole)
+    assert "<img" not in tip and "&lt;img" in tip
+
+
+def test_excepthook_logs_and_shows(app, tmp_path, monkeypatch):
+    from voiceover import app as appmod
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()))
+    old = sys.excepthook
+    try:
+        appmod.install_excepthook()
+        try:
+            raise ValueError("сломалось")
+        except ValueError:
+            sys.excepthook(*sys.exc_info())
+    finally:
+        sys.excepthook = old
+    assert shown and "сломалось" in shown[0] and "voiceover.log" in shown[0]
+    log = (tmp_path / "VoiceOverStudio" / "voiceover.log").read_text(encoding="utf-8")
+    assert "ValueError: сломалось" in log and "Traceback" in log
+
+
+def test_export_asks_before_overwrite(win, tmp_path, monkeypatch):
+    from voiceover.core.models import Project
+    from voiceover.ui import main_window as mw
+    video = tmp_path / "v.mkv"
+    video.write_bytes(b"x")
+    existing = tmp_path / "out.mkv"
+    existing.write_bytes(b"old")
+    p = Project(path=str(tmp_path / "p.vop"), video_path=str(video), duration=1)
+    win.set_project(p)
+
+    class Dlg:
+        def __init__(self, default, parent):
+            from PySide6.QtWidgets import QLineEdit, QComboBox
+            self.out = QLineEdit(str(existing))
+            self.kind = QComboBox()
+            self.kind.addItem("v", "video")
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def options(self):
+            return None
+
+    asked = []
+    monkeypatch.setattr(mw, "ExportDialog", Dlg)
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: (asked.append(a[2]), QMessageBox.No)[1]))
+    started = []
+    monkeypatch.setattr(win, "run_task", lambda *a, **k: started.append(a))
+    win.export()
+    assert any("уже существует" in q for q in asked) and not started
+    assert existing.read_bytes() == b"old"
