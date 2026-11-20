@@ -125,3 +125,39 @@ def test_subtitle_export_dialog_flow(win, tmp_path, monkeypatch):
     run("srt", "orig")
     subs = load_subtitles(tmp_path / "ep01.ru.srt", detect_speakers=False)
     assert [s.text for s in subs] == ["Xin chào", "Пока"]
+
+
+def test_cast_between_episodes(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    from voiceover.core import cast
+    from voiceover.core.models import Engine, Line, Project
+    from voiceover.ui import main_window as mw
+    monkeypatch.setattr(cast, "library_path", lambda: tmp_path / "cast.json")
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
+    monkeypatch.setattr(QInputDialog, "getItem",
+                        staticmethod(lambda *a, **k: ("Inazuma", True)))
+    # серия 1: настроенные голоса -> состав
+    ep1 = Project(path=str(tmp_path / "e1.vop"), duration=5)
+    t = ep1.add_character("Тенма", engine=Engine.PIPER, voice="ru_RU-dmitri-medium", pitch=-8)
+    ep1.add_character("Аки", engine=Engine.PIPER, voice="ru_RU-irina-medium")
+    ep1.lines = [Line(0, 1, "a", t.id)]
+    win.set_project(ep1)
+    win.chars.save_cast()
+    assert {c["name"] for c in cast.get_cast("Inazuma")} == {"Тенма", "Аки"}
+    # серия 2: загрузили состав (без добавления недостающих), затем импорт субтитров
+    ep2 = Project(path=str(tmp_path / "e2.vop"), duration=5)
+    win.set_project(ep2)
+    win.chars.load_cast()
+    assert ep2.cast_name == "Inazuma" and ep2.characters == []
+    srt = tmp_path / "e2.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nАки: Привет\n\n"
+                   "2\n00:00:03,000 --> 00:00:04,000\nАки: Пока\n\n"
+                   "3\n00:00:05,000 --> 00:00:06,000\nНовенький: Кто тут?\n\n"
+                   "4\n00:00:07,000 --> 00:00:08,000\nНовенький: Я\n", encoding="utf-8")
+    monkeypatch.setattr(mw.ImportSubsDialog, "exec", lambda self: QDialog.Accepted)
+    win.import_subtitles(str(srt))
+    aki = ep2.character_by_name("Аки")
+    assert aki.engine == Engine.PIPER and aki.voice == "ru_RU-irina-medium"   # из состава
+    assert ep2.character_by_name("Новенький").voice != "ru_RU-irina-medium"  # не из состава
+    assert "Inazuma" in win.chars.cast_lbl.text()

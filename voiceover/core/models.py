@@ -143,6 +143,7 @@ class Project:
     lines: list[Line] = field(default_factory=list)
     mix: MixSettings = field(default_factory=MixSettings)
     audio_stream: int = 0         # индекс аудиодорожки оригинала
+    cast_name: str = ""           # состав из библиотеки (голоса для новых персонажей)
     duration: float = 0.0
     # Пути к служебным файлам (относительно папки проекта)
     original_wav: str = ""
@@ -216,6 +217,7 @@ class Project:
             "version": PROJECT_VERSION,
             "video_path": self.video_path,
             "audio_stream": self.audio_stream,
+            "cast_name": self.cast_name,
             "duration": self.duration,
             "original_wav": self.original_wav,
             "background_wav": self.background_wav,
@@ -229,6 +231,7 @@ class Project:
         return cls(
             video_path=d.get("video_path", ""),
             audio_stream=d.get("audio_stream", 0),
+            cast_name=d.get("cast_name", ""),
             duration=d.get("duration", 0.0),
             original_wav=d.get("original_wav", ""),
             background_wav=d.get("background_wav", ""),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -97,6 +98,17 @@ class CharactersPanel(QWidget):
         top = QHBoxLayout()
         for b in (btn_add, btn_del, btn_merge, btn_auto):
             top.addWidget(b)
+        self.btn_cast_save = QPushButton(theme.icon("save"), " Сохранить состав…")
+        self.btn_cast_save.setToolTip("Сохранить голоса персонажей в библиотеку — для следующих серий")
+        self.btn_cast_load = QPushButton(theme.icon("users"), " Загрузить состав…")
+        self.btn_cast_load.setToolTip("Применить голоса из библиотеки к персонажам с теми же именами")
+        self.cast_lbl = QLabel()
+        self.cast_lbl.setObjectName("muted")
+        self.cast_lbl.setTextFormat(Qt.PlainText)
+        cast_row = QHBoxLayout()
+        cast_row.addWidget(self.btn_cast_save)
+        cast_row.addWidget(self.btn_cast_load)
+        cast_row.addWidget(self.cast_lbl, 1)
 
         self.box = QGroupBox("Настройки персонажа")
         f = QFormLayout(self.box)
@@ -159,6 +171,7 @@ class CharactersPanel(QWidget):
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
         lay.addLayout(top)
+        lay.addLayout(cast_row)
         lay.addWidget(self.list, 1)
         lay.addWidget(self.box)
 
@@ -166,6 +179,8 @@ class CharactersPanel(QWidget):
         btn_del.clicked.connect(self.delete_character)
         btn_merge.clicked.connect(self.merge_character)
         btn_auto.clicked.connect(self.auto_voices)
+        self.btn_cast_save.clicked.connect(self.save_cast)
+        self.btn_cast_load.clicked.connect(self.load_cast)
         self.list.currentRowChanged.connect(self._load_current)
         self.color_btn.clicked.connect(self._pick_color)
         self.name.editingFinished.connect(self._save)
@@ -195,6 +210,7 @@ class CharactersPanel(QWidget):
         self.reload()
 
     def reload(self, select_id: Optional[str] = None) -> None:
+        self._update_cast_label()
         cur = select_id or (self.current().id if self.current() else None)
         self.list.blockSignals(True)
         self.list.clear()
@@ -374,6 +390,67 @@ class CharactersPanel(QWidget):
         self.reload(target.id)
         self.listChanged.emit()
 
+    def _update_cast_label(self):
+        name = self.project.cast_name if self.project else ""
+        self.cast_lbl.setText(f"Состав: {name}" if name else "Состав не выбран")
+
+    def save_cast(self):
+        from ..core import cast
+        p = self.project
+        if not p or not p.characters:
+            return
+        names = cast.list_casts()
+        default = p.cast_name or (Path(p.video_path).parent.name if p.video_path else "")
+        name, ok = QInputDialog.getItem(
+            self, "Сохранить состав",
+            "Название состава (например, название сериала).\n"
+            "Если состав уже есть, он дополнится персонажами этой серии:",
+            ([default] if default and default not in names else []) + names, 0, True)
+        name = name.strip() if ok else ""
+        if not name:
+            return
+        n = cast.save_cast(name, p.characters)
+        p.cast_name = name
+        self._update_cast_label()
+        self.changed.emit()
+        QMessageBox.information(self, "Состав", f"Состав «{name}» сохранён: персонажей — {n}.\n\n"
+                                "В следующей серии нажмите «Загрузить состав…».")
+
+    def load_cast(self):
+        from ..core import cast
+        p = self.project
+        if not p:
+            return
+        names = cast.list_casts()
+        if not names:
+            QMessageBox.information(self, "Состав", "В библиотеке пока нет составов. Настройте голоса "
+                                    "и нажмите «Сохранить состав…».")
+            return
+        start = names.index(p.cast_name) if p.cast_name in names else 0
+        name, ok = QInputDialog.getItem(self, "Загрузить состав", "Состав:", names, start, False)
+        if not ok:
+            return
+        have = {c.name.strip().lower() for c in p.characters}
+        missing = [e["name"] for e in cast.get_cast(name) if e["name"].strip().lower() not in have]
+        add = False
+        if missing:
+            r = QMessageBox.question(
+                self, "Загрузить состав",
+                f"В составе есть персонажи, которых нет в проекте ({len(missing)}): "
+                f"{', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}.\n\nДобавить их?",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+            if r == QMessageBox.Cancel:
+                return
+            add = r == QMessageBox.Yes
+        upd, added = cast.apply_cast(p, name, add_missing=add)
+        self._update_cast_label()
+        self.reload()
+        self.changed.emit()
+        self.listChanged.emit()
+        QMessageBox.information(self, "Состав", f"Состав «{name}»: голоса применены к {upd} "
+                                f"персонажам, добавлено {added}.\nНовые персонажи из субтитров "
+                                "получат голоса этого состава автоматически.")
+
     def auto_voices(self):
         if not self.project:
             return
@@ -394,7 +471,7 @@ class CharactersPanel(QWidget):
             return
         for i, c in enumerate(self.project.characters):
             if c.source == LineSource.TTS:
-                auto_assign_voice(self.project, c, i, engine.id)
+                auto_assign_voice(self.project, c, i, engine.id, use_cast=False)
         self.reload()
         self.changed.emit()
         self.listChanged.emit()
@@ -419,7 +496,7 @@ def preferred_engine(project: Project, exclude: Optional[Character] = None) -> s
 
 
 def auto_assign_voice(project: Project, c: Character, index: Optional[int] = None,
-                      engine: Optional[str] = None) -> None:
+                      engine: Optional[str] = None, use_cast: bool = True) -> None:
     """Подобрать голос так, чтобы персонажи звучали по-разному: перебираем голоса
     и добавляем вариации высоты/темпа, когда голоса заканчиваются."""
     if index is None:
@@ -439,3 +516,7 @@ def auto_assign_voice(project: Project, c: Character, index: Optional[int] = Non
     c.voice = v.id
     c.rate = rate
     c.pitch = pitch
+    # Если у проекта есть состав из библиотеки и в нём есть этот персонаж — его голос
+    if use_cast and project.cast_name:
+        from ..core.cast import apply_cast
+        apply_cast(project, project.cast_name, only=[c])
