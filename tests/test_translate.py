@@ -89,3 +89,91 @@ def test_google_gives_up_after_limit():
                    sleep=lambda s: None)
     with pytest.raises(RateLimited):
         g.translate("x")
+
+
+# ----------------------------------------------------------------- локальный NLLB и DeepL
+from voiceover.core import translate as T  # noqa: E402
+
+
+def test_detect_lang():
+    assert T.detect_lang("こんにちは、元気？") == "ja"
+    assert T.detect_lang("안녕하세요") == "ko"
+    assert T.detect_lang("你好世界") == "zh-CN"
+    assert T.detect_lang("Привет, мир") == "ru"
+    assert T.detect_lang("Привіт, їжак") == "uk"
+    assert T.detect_lang("Hello there") == "en"
+
+
+class FakeSP:
+    def __init__(self, model_file):
+        self.model_file = model_file
+
+    def encode(self, text, out_type=str):
+        return ["▁" + w for w in text.split()]
+
+    def decode(self, toks):
+        return " ".join(t.lstrip("▁") for t in toks)
+
+
+class FakeCT2:
+    calls = []
+
+    def __init__(self, path, device="cpu", compute_type="int8", intra_threads=1):
+        self.device = device
+
+    def translate_batch(self, sources, target_prefix, **kw):
+        FakeCT2.calls.append((sources, target_prefix, kw))
+        from types import SimpleNamespace
+        # «перевод»: целевой код + слова в верхнем регистре
+        return [SimpleNamespace(hypotheses=[[tp[0]] + [w.upper() for w in src[1:-1]]])
+                for src, tp in zip(sources, target_prefix)]
+
+
+def test_nllb_builds_requests(monkeypatch, tmp_path):
+    import types
+    ct2 = types.SimpleNamespace(Translator=FakeCT2, get_cuda_device_count=lambda: 0)
+    spm = types.SimpleNamespace(SentencePieceProcessor=FakeSP)
+    monkeypatch.setitem(__import__("sys").modules, "ctranslate2", ct2)
+    monkeypatch.setitem(__import__("sys").modules, "sentencepiece", spm)
+    monkeypatch.setattr(T, "ensure_nllb", lambda size, progress=None: tmp_path)
+    FakeCT2.calls.clear()
+    tr = T.NllbLocal("auto", "ru")
+    out = T.translate_texts(["hello world", "こんにちは 世界", "", "bye"], tr)
+    assert out == ["▁HELLO ▁WORLD".replace("▁", ""), "こんにちは 世界".upper(), "", "BYE"]
+    sources, prefix, kw = FakeCT2.calls[0]
+    assert sources[0] == ["eng_Latn", "▁hello", "▁world", "</s>"]
+    assert sources[1][0] == "jpn_Jpan"            # язык определён по письменности
+    assert prefix[0] == ["rus_Cyrl"] and kw["beam_size"] == 4
+    assert len(FakeCT2.calls) == 1                # одна пачка, без склейки через \n
+
+
+def test_nllb_unsupported_target(monkeypatch, tmp_path):
+    import types
+    monkeypatch.setitem(__import__("sys").modules, "ctranslate2",
+                        types.SimpleNamespace(Translator=FakeCT2, get_cuda_device_count=lambda: 0))
+    monkeypatch.setitem(__import__("sys").modules, "sentencepiece",
+                        types.SimpleNamespace(SentencePieceProcessor=FakeSP))
+    with pytest.raises(RuntimeError):
+        T.NllbLocal("en", "xx")
+
+
+def test_deepl_batches_and_errors():
+    sent = []
+
+    def post(url, data, timeout, headers):
+        sent.append((url, data, headers))
+        texts = [v for k, v in data if k == "text"]
+        return Resp(200, {"translations": [{"text": t.upper()} for t in texts]})
+
+    d = T.DeepLApi("abc:fx", "ja", "ru", post=post)
+    out = T.translate_texts([f"t{i}" for i in range(90)], d)
+    assert out[0] == "T0" and len(out) == 90
+    assert len(sent) == 3                                   # по 40 реплик
+    url, data, headers = sent[0]
+    assert url.startswith("https://api-free.deepl.com")
+    assert ("target_lang", "RU") in data and ("source_lang", "JA") in data
+    assert headers["Authorization"] == "DeepL-Auth-Key abc:fx"
+    bad = T.DeepLApi("k", "auto", "ru", post=lambda *a, **k: Resp(456))
+    with pytest.raises(PartialTranslation) as ei:
+        T.translate_texts(["x"], bad)
+    assert "лимит" in str(ei.value)

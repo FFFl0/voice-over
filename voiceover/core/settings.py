@@ -31,6 +31,9 @@ class AppSettings:
     whisper_max_len: float = 7.0
     translate_source: str = "auto"
     translate_target: str = "ru"
+    translate_engine: str = ""      # local | google | deepl ("" — выбрать автоматически)
+    nllb_size: str = "600M"
+    deepl_key: str = ""
     ocr_language: str = "en"
     ocr_mode: str = "light"
     ocr_fps: float = 4.0

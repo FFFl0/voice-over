@@ -570,13 +570,33 @@ class TranslateDialog(QDialog):
         self.skip_done = QCheckBox("Пропускать уже переведённые реплики")
         self.skip_done.setChecked(True)
         self.skip_done.setToolTip("Выключите, чтобы перевести заново — с сохранённого оригинала")
-        note = QLabel("Используется Google Переводчик (нужен интернет, ключ не нужен). Реплики уходят "
-                      "крупными пачками с паузами, чтобы Google не ограничивал запросы. Текст оригинала "
-                      "сохраняется в реплике, вернуть его можно через контекстное меню таблицы "
-                      "или «Отменить». Озвучка переведённых реплик станет «устаревшей».")
+        from ..core.translate import NLLB_SIZES, nllb_available
+        self.engine = QComboBox()
+        self.engine.addItem("Локально, без интернета (NLLB-200)", "local")
+        self.engine.addItem("DeepL (онлайн, нужен бесплатный ключ)", "deepl")
+        self.engine.addItem("Google Переводчик (онлайн, без ключа)", "google")
+        eng = s.translate_engine or ("local" if nllb_available()[0] else "google")
+        self.engine.setCurrentIndex(max(0, self.engine.findData(eng)))
+        self.size = QComboBox()
+        for code, title in NLLB_SIZES:
+            self.size.addItem(f"{code} — {title}", code)
+        self.size.setCurrentIndex(max(0, self.size.findData(s.nllb_size)))
+        self.key = QLineEdit(s.deepl_key)
+        self.key.setPlaceholderText("ключ DeepL API (deepl.com/pro-api, тариф Free)")
+        self.key.setEchoMode(QLineEdit.Password)
+        self.engine_note = QLabel()
+        self.engine_note.setWordWrap(True)
+        note = QLabel("Текст оригинала сохраняется в реплике, вернуть его можно через контекстное "
+                      "меню таблицы или «Отменить». Озвучка переведённых реплик станет «устаревшей».")
         note.setWordWrap(True)
         note.setObjectName("muted")
         f = QFormLayout()
+        f.addRow("Переводчик:", self.engine)
+        self._size_row = QLabel("Модель:")
+        f.addRow(self._size_row, self.size)
+        self._key_row = QLabel("Ключ DeepL:")
+        f.addRow(self._key_row, self.key)
+        f.addRow("", self.engine_note)
         f.addRow("С языка:", self.source)
         f.addRow("На язык:", self.target)
         f.addRow("Что переводить:", self.scope_sel)
@@ -591,13 +611,53 @@ class TranslateDialog(QDialog):
         lay.addLayout(f)
         lay.addWidget(note)
         lay.addWidget(bb)
+        self.engine.currentIndexChanged.connect(self._update_engine)
+        self.size.currentIndexChanged.connect(self._update_engine)
+        self._update_engine()
+
+    def _update_engine(self, *_):
+        from ..core.translate import nllb_available, nllb_downloaded
+        eng = self.engine.currentData()
+        for w in (self._size_row, self.size):
+            w.setVisible(eng == "local")
+        for w in (self._key_row, self.key):
+            w.setVisible(eng == "deepl")
+        th = theme.current()
+        color = th.muted
+        if eng == "local":
+            ok, why = nllb_available()
+            if not ok:
+                text, color = why, th.danger
+            elif nllb_downloaded(self.size.currentData()):
+                text = "Модель скачана. Перевод идёт на этом компьютере, без лимитов."
+            else:
+                text = ("При первом запуске модель скачается (один раз), дальше интернет не нужен. "
+                        "Лицензия модели — некоммерческое использование.")
+        elif eng == "deepl":
+            text = "Высокое качество, 500 000 символов в месяц бесплатно. Ключ хранится в настройках программы."
+        else:
+            text = ("Бесплатно, но Google может временно заблокировать перевод после "
+                    "большого числа запросов.")
+        self.engine_note.setText(text)
+        self.engine_note.setStyleSheet(f"color:{color}")
 
     def _ok(self):
+        from ..core.translate import nllb_available
         if self.source.currentData() == self.target.currentData():
             QMessageBox.warning(self, "Перевод", "Языки оригинала и перевода совпадают.")
             return
+        eng = self.engine.currentData()
+        if eng == "local" and not nllb_available()[0]:
+            QMessageBox.warning(self, "Перевод", nllb_available()[1])
+            return
+        if eng == "deepl" and not self.key.text().strip():
+            QMessageBox.warning(self, "Перевод", "Введите ключ DeepL API или выберите другой переводчик.")
+            return
         self.s.translate_source = self.source.currentData()
         self.s.translate_target = self.target.currentData()
+        self.s.translate_engine = eng
+        self.s.nllb_size = self.size.currentData()
+        self.s.deepl_key = self.key.text().strip()
         self.s.save()
         self.accept()
 

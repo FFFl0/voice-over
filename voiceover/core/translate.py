@@ -178,12 +178,20 @@ def translate_texts(texts: list[str], translator: Translator,
     todo = [i for i, t in enumerate(clean) if t]
     groups = _chunks([clean[i] for i in todo], chunk_chars)
     count = 0
+    batch = getattr(translator, "translate_batch", None)
+    if batch is not None:
+        # Пакетные движки (локальная модель, DeepL) получают реплики списком, без склейки
+        size = getattr(translator, "batch_size", 16)
+        groups = [list(range(k, min(k + size, len(todo)))) for k in range(0, len(todo), size)]
     for g in groups:
         if cancel and cancel():
             raise PartialTranslation("Перевод отменён", result, done)
         idx = [todo[k] for k in g]
         try:
-            out = _translate_group(translator, [clean[i] for i in idx])
+            if batch is not None:
+                out = [o.replace("\n", " ").strip() for o in batch([clean[i] for i in idx])]
+            else:
+                out = _translate_group(translator, [clean[i] for i in idx])
         except Cancelled:
             raise PartialTranslation("Перевод отменён", result, done)
         except Exception as e:  # noqa: BLE001
@@ -195,3 +203,216 @@ def translate_texts(texts: list[str], translator: Translator,
         if progress:
             progress(count / max(1, len(todo)), f"Перевод: {count} из {len(todo)} реплик")
     return result
+
+
+# ============================================================================ локальный перевод
+# NLLB-200 (Meta) через CTranslate2 — тот же движок, что у Whisper, PyTorch не нужен.
+# Модель скачивается один раз с HuggingFace (лицензия CC-BY-NC 4.0 — для некоммерческого
+# использования). Перевод напрямую между 200 языками, без интернета и без лимитов.
+
+NLLB_CODES = {
+    "ru": "rus_Cyrl", "en": "eng_Latn", "ja": "jpn_Jpan", "ko": "kor_Hang",
+    "zh-CN": "zho_Hans", "zh-TW": "zho_Hant", "uk": "ukr_Cyrl", "be": "bel_Cyrl",
+    "kk": "kaz_Cyrl", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn",
+    "it": "ita_Latn", "pt": "por_Latn", "pl": "pol_Latn", "tr": "tur_Latn",
+    "ar": "arb_Arab", "hi": "hin_Deva", "th": "tha_Thai", "vi": "vie_Latn",
+    "id": "ind_Latn",
+}
+
+# Готовые сборки CTranslate2 (int8); пробуются по очереди
+NLLB_MODELS = {
+    "600M": ("JustFrederik/nllb-200-distilled-600M-ct2-int8",
+             "skywood/nllb-200-distilled-600M-ct2-int8"),
+    "1.3B": ("OpenNMT/nllb-200-distilled-1.3B-ct2-int8",
+             "JustFrederik/nllb-200-distilled-1.3B-ct2-int8",
+             "winstxnhdw/nllb-200-distilled-1.3B-ct2-int8"),
+}
+NLLB_SIZES = [("600M", "Быстрая, ~600 МБ"), ("1.3B", "Точнее, ~1.4 ГБ, медленнее")]
+NLLB_TOKENIZER_REPO = "facebook/nllb-200-distilled-600M"   # общий токенизатор всех размеров
+
+
+def nllb_available() -> tuple[bool, str]:
+    missing = []
+    for mod, pkg in (("ctranslate2", "ctranslate2"), ("sentencepiece", "sentencepiece"),
+                     ("huggingface_hub", "huggingface_hub")):
+        try:
+            __import__(mod)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        return False, ("Для локального перевода нужны пакеты: " + ", ".join(missing) +
+                       "\npip install " + " ".join(missing))
+    return True, ""
+
+
+def nllb_dir(size: str):
+    from .settings import data_dir
+    return data_dir() / "models" / f"nllb-{size}"
+
+
+def nllb_downloaded(size: str) -> bool:
+    d = nllb_dir(size)
+    return (d / "model.bin").exists() and (d / "sentencepiece.bpe.model").exists()
+
+
+def ensure_nllb(size: str, progress: Optional[Callable[[str], None]] = None):
+    """Скачать модель (один раз). Возвращает папку модели."""
+    from huggingface_hub import hf_hub_download, snapshot_download
+    d = nllb_dir(size)
+    d.mkdir(parents=True, exist_ok=True)
+    errors = []
+    if not (d / "model.bin").exists():
+        for repo in NLLB_MODELS.get(size, NLLB_MODELS["600M"]):
+            if progress:
+                progress(f"Скачивание модели перевода NLLB {size} ({repo}), это делается один раз…")
+            try:
+                snapshot_download(repo_id=repo, local_dir=str(d),
+                                  allow_patterns=["*.bin", "*.json", "*.model", "*.txt"])
+                if (d / "model.bin").exists():
+                    break
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{repo}: {e}")
+        if not (d / "model.bin").exists():
+            raise RuntimeError("Не удалось скачать модель перевода:\n" + "\n".join(errors))
+    if not (d / "sentencepiece.bpe.model").exists():
+        if progress:
+            progress("Скачивание словаря модели перевода…")
+        hf_hub_download(NLLB_TOKENIZER_REPO, "sentencepiece.bpe.model", local_dir=str(d))
+    return d
+
+
+def detect_lang(text: str) -> str:
+    """Грубое определение языка по письменности (для источника «авто» в NLLB)."""
+    kana = han = hangul = cyr = latin = 0
+    for ch in text:
+        o = ord(ch)
+        if 0x3040 <= o <= 0x30FF:
+            kana += 1
+        elif 0x4E00 <= o <= 0x9FFF:
+            han += 1
+        elif 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF:
+            hangul += 1
+        elif 0x0400 <= o <= 0x04FF:
+            cyr += 1
+        elif ch.isalpha() and o < 0x250:
+            latin += 1
+    if kana:
+        return "ja"
+    if hangul >= max(han, 1):
+        return "ko"
+    if han:
+        return "zh-CN"
+    if cyr > latin:
+        return "uk" if any(c in text for c in "їієґЇІЄҐ") else "ru"
+    return "en"
+
+
+class NllbLocal:
+    """Локальный переводчик NLLB-200 (CTranslate2 + SentencePiece)."""
+
+    batch_size = 16
+
+    def __init__(self, source: str, target: str, size: str = "600M", device: str = "auto",
+                 progress: Optional[Callable[[str], None]] = None):
+        import ctranslate2
+        import sentencepiece as spm
+        if target not in NLLB_CODES:
+            raise RuntimeError(f"Язык перевода «{target}» не поддерживается локальной моделью")
+        self.source = source
+        self.target = target
+        d = ensure_nllb(size, progress)
+        if progress:
+            progress("Загрузка модели перевода в память…")
+        self.sp = spm.SentencePieceProcessor(model_file=str(d / "sentencepiece.bpe.model"))
+        import os
+        threads = max(1, (os.cpu_count() or 4) // 2)
+        self.model = None
+        if device in ("auto", "cuda"):
+            try:
+                if ctranslate2.get_cuda_device_count() > 0:
+                    self.model = ctranslate2.Translator(str(d), device="cuda",
+                                                        compute_type="int8_float16")
+            except Exception:  # noqa: BLE001  нет CUDA/cuDNN — на процессоре
+                self.model = None
+        if self.model is None:
+            self.model = ctranslate2.Translator(str(d), device="cpu", compute_type="int8",
+                                                intra_threads=threads)
+
+    def _src_code(self, text: str) -> str:
+        lang = self.source if self.source in NLLB_CODES else detect_lang(text)
+        return NLLB_CODES.get(lang, "eng_Latn")
+
+    def translate_batch(self, texts: list[str]) -> list[str]:
+        if not texts:
+            return []
+        tgt = NLLB_CODES[self.target]
+        sources = [[self._src_code(t)] + self.sp.encode(t, out_type=str) + ["</s>"] for t in texts]
+        res = self.model.translate_batch(sources, target_prefix=[[tgt]] * len(texts),
+                                         beam_size=4, max_decoding_length=256,
+                                         max_batch_size=self.batch_size)
+        out = []
+        for r in res:
+            toks = [t for t in r.hypotheses[0] if t != tgt]
+            out.append(self.sp.decode(toks).strip())
+        return out
+
+    def translate(self, text: str) -> str:
+        return self.translate_batch([text])[0]
+
+
+# ============================================================================ DeepL
+
+DEEPL_TARGET = {"ru": "RU", "en": "EN-US", "ja": "JA", "ko": "KO", "zh-CN": "ZH-HANS",
+                "zh-TW": "ZH-HANT", "uk": "UK", "de": "DE", "fr": "FR", "es": "ES",
+                "it": "IT", "pt": "PT-PT", "pl": "PL", "tr": "TR", "ar": "AR", "id": "ID"}
+
+
+class DeepLApi:
+    """DeepL API (бесплатный ключ: 500 000 символов в месяц)."""
+
+    batch_size = 40
+
+    def __init__(self, key: str, source: str, target: str, post: Optional[Callable] = None,
+                 sleep: Callable[[float], None] = time.sleep,
+                 on_wait: Optional[Callable[[float], None]] = None):
+        if not key.strip():
+            raise RuntimeError("Не указан ключ DeepL (получить бесплатно: deepl.com/pro-api)")
+        if target not in DEEPL_TARGET:
+            raise RuntimeError(f"DeepL не переводит на язык «{target}»")
+        self.key = key.strip()
+        self.url = ("https://api-free.deepl.com/v2/translate" if self.key.endswith(":fx")
+                    else "https://api.deepl.com/v2/translate")
+        self.source = None if source in ("auto", "", None) else source.split("-")[0].upper()
+        self.target = DEEPL_TARGET[target]
+        self.sleep = sleep
+        self.on_wait = on_wait
+        if post is None:
+            import requests
+            post = requests.Session().post
+        self.post = post
+
+    def translate_batch(self, texts: list[str]) -> list[str]:
+        data = [("text", t) for t in texts] + [("target_lang", self.target)]
+        if self.source:
+            data.append(("source_lang", self.source))
+        wait = 5.0
+        for _ in range(6):
+            r = self.post(self.url, data=data, timeout=60,
+                          headers={"Authorization": f"DeepL-Auth-Key {self.key}"})
+            if r.status_code == 429:
+                if self.on_wait:
+                    self.on_wait(wait)
+                self.sleep(wait)
+                wait = min(wait * 2, 60.0)
+                continue
+            if r.status_code == 403:
+                raise RuntimeError("DeepL: неверный ключ API")
+            if r.status_code == 456:
+                raise RuntimeError("DeepL: исчерпан месячный лимит символов")
+            if r.status_code >= 400:
+                raise RuntimeError(f"DeepL ответил ошибкой {r.status_code}")
+            return [x["text"] for x in r.json()["translations"]]
+        raise RateLimited("DeepL временно ограничил число запросов, попробуйте позже")
+
+    def translate(self, text: str) -> str:
+        return self.translate_batch([text])[0]

@@ -17,10 +17,21 @@ if TYPE_CHECKING:
     from .main_window import MainWindow
 
 
+def make_translator(settings, src: str, dst: str, on_wait, task: Task):
+    """Переводчик по настройкам: локальная модель, DeepL или Google."""
+    from ..core import translate as tr
+    eng = settings.translate_engine or ("local" if tr.nllb_available()[0] else "google")
+    if eng == "local":
+        return tr.NllbLocal(src, dst, settings.nllb_size,
+                            progress=lambda text: task.report(0.0, text))
+    if eng == "deepl":
+        return tr.DeepLApi(settings.deepl_key, src, dst, on_wait=on_wait)
+    return tr.google_translator(src, dst, on_wait=on_wait, cancel=task.is_cancelled)
+
+
 def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> None:
     """Перевести реплики. lines=None — спросить в диалоге (выделенные или все)."""
-    from ..core.translate import (PartialTranslation, google_translator, translate_texts,
-                                  translator_available)
+    from ..core.translate import PartialTranslation, translate_texts, translator_available
     from .dialogs import TranslateDialog
 
     p = win.project
@@ -58,9 +69,9 @@ def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> No
             t.report(f, text)
 
         def on_wait(sec):
-            t.report(state["frac"], f"Google просит подождать: пауза {sec:.0f} с, затем перевод продолжится")
+            t.report(state["frac"], f"Переводчик просит подождать: пауза {sec:.0f} с, затем перевод продолжится")
 
-        tr = google_translator(src, dst, on_wait=on_wait, cancel=t.is_cancelled)
+        tr = make_translator(win.settings, src, dst, on_wait, t)
         try:
             result = translate_texts(sources, tr, prog, t.is_cancelled)
             t.emit((result, [True] * len(result), ""))
