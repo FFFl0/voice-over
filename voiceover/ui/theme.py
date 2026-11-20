@@ -440,6 +440,9 @@ _ICONS: dict[str, str] = {
     "sliders": '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
     "film": '<rect x="3" y="3" width="18" height="18"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4M3 12h18"/>',
     "help": '<rect x="3" y="3" width="18" height="18"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/>',
+    "translate": '<path d="M3 5h9M7.5 3v2M5 5c.5 3.5 3 6.5 6.5 8M10 5c-.5 3.5-3 6.5-6.5 8"/>'
+                 '<path d="M13 21l4.5-10 4.5 10M14.6 17.5h5.8"/>',
+    "ocr": '<path d="M3 8V4h4M21 8V4h-4M3 16v4h4M21 16v4h-4"/><path d="M7 10h10M7 14h7"/>',
     "headphones": '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><rect x="3" y="14" width="4" height="7"/>'
                   '<rect x="17" y="14" width="4" height="7"/>',
     "refresh": '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',

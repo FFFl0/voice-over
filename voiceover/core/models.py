@@ -92,6 +92,9 @@ class Line:
     rec_offset: float = 0.0  # смещение начала записи относительно start, сек
     gain_db: float = 0.0
     note: str = ""
+    # Текст оригинала (до перевода) и его язык; пусто, если реплику не переводили
+    orig_text: str = ""
+    orig_lang: str = ""
 
     @property
     def duration(self) -> float:

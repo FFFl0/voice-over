@@ -7,15 +7,15 @@ from typing import Optional
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt,
                             Signal)
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette
-from PySide6.QtWidgets import QComboBox, QStyle, QStyledItemDelegate
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QComboBox, QStyle, QStyledItemDelegate, QTableView
 
 from ..core.models import Line, Project, line_status
 from ..core.subtitles import fmt_clock, parse_ts
 from . import theme
 
-COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "Статус"]
-C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS = range(6)
+COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "Статус", "Оригинал"]
+C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS, C_ORIG = range(7)
 
 STATUS_TEXT = {
     "ok": "синтез",
@@ -92,7 +92,7 @@ class LinesModel(QAbstractTableModel):
 
     def flags(self, index):
         f = Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        if index.column() in (C_START, C_END, C_CHAR, C_TEXT):
+        if index.column() in (C_START, C_END, C_CHAR, C_TEXT, C_ORIG):
             f |= Qt.ItemIsEditable
         if index.column() == C_NUM:
             f |= Qt.ItemIsUserCheckable
@@ -117,6 +117,8 @@ class LinesModel(QAbstractTableModel):
                 return ln.text
             if c == C_STATUS:
                 return STATUS_TEXT[line_status(self.project, ln)]
+            if c == C_ORIG:
+                return ln.orig_text
         elif role == Qt.EditRole:
             if c == C_START:
                 return fmt_clock(ln.start)
@@ -126,10 +128,12 @@ class LinesModel(QAbstractTableModel):
                 return ln.character_id or ""
             if c == C_TEXT:
                 return ln.text
+            if c == C_ORIG:
+                return ln.orig_text
         elif role == Qt.CheckStateRole and c == C_NUM:
             return Qt.Checked if ln.enabled else Qt.Unchecked
         elif role == Qt.ForegroundRole:
-            if not ln.enabled or c in (C_NUM, C_START, C_END):
+            if not ln.enabled or c in (C_NUM, C_START, C_END, C_ORIG):
                 return QBrush(QColor(theme.current().muted))
         elif role == Qt.FontRole and c in (C_NUM, C_START, C_END):
             return theme.body_font(theme.TEXT_SM, tabular=True)
@@ -138,8 +142,11 @@ class LinesModel(QAbstractTableModel):
         elif role == Qt.UserRole + 2 and ch:   # цвет роли
             return ch.color
         elif role == Qt.ToolTipRole:
-            if c == C_TEXT:
-                return ln.text + (f"\n\nЗаметка: {ln.note}" if ln.note else "")
+            if c in (C_TEXT, C_ORIG):
+                tip = ln.text
+                if ln.orig_text:
+                    tip += f"\n\nОригинал: {ln.orig_text}"
+                return tip + (f"\n\nЗаметка: {ln.note}" if ln.note else "")
             if c == C_NUM:
                 return "Снимите галочку, чтобы исключить реплику из озвучки"
         elif role == Qt.UserRole:
@@ -165,6 +172,8 @@ class LinesModel(QAbstractTableModel):
                     ln.character_id = value or None
                 elif c == C_TEXT:
                     ln.text = str(value).strip()
+                elif c == C_ORIG:
+                    ln.orig_text = str(value).strip()
                 else:
                     return False
             except ValueError:
@@ -275,3 +284,43 @@ class RoleDelegate(QStyledItemDelegate):
 
     def setModelData(self, editor, model, index):
         self._combo.setModelData(editor, model, index)
+
+
+class LinesView(QTableView):
+    """Таблица реплик с заметной рамкой вокруг выделенных строк.
+
+    Фон выделения бывает едва отличим от строки, поэтому поверх рисуется рамка
+    цвета акцента: у текущей реплики толще, у остальных выделенных — тоньше."""
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        sm = self.selectionModel()
+        model = self.model()
+        if sm is None or model is None or model.columnCount() == 0:
+            return
+        rows = sorted({i.row() for i in sm.selectedRows()})
+        if not rows:
+            return
+        cur = self.currentIndex().row()
+        last_col = model.columnCount() - 1
+        while last_col > 0 and self.isColumnHidden(last_col):
+            last_col -= 1
+        accent = QColor(theme.current().accent)
+        p = QPainter(self.viewport())
+        p.setRenderHint(QPainter.Antialiasing, True)
+        fill = QColor(accent)
+        fill.setAlpha(28)
+        for r in rows:
+            rect = self.visualRect(model.index(r, 0)).united(self.visualRect(model.index(r, last_col)))
+            if not rect.isValid() or not rect.intersects(e.rect()):
+                continue
+            rect.setLeft(0)
+            rect.setRight(self.viewport().width() - 1)
+            p.fillRect(rect, fill)
+            width = 2.5 if r == cur else 1.5
+            p.setPen(QPen(accent, width))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(rect).adjusted(1.5, 1.5, -1.5, -1.5), 3, 3)
+            if r == cur:   # полоса слева у текущей реплики
+                p.fillRect(QRectF(rect.left() + 1, rect.top() + 2, 4, rect.height() - 4), accent)
+        p.end()

@@ -117,6 +117,8 @@ class StreamInfo:
     language: str = ""
     title: str = ""
     description: str = ""
+    width: int = 0       # для видеопотока
+    height: int = 0
 
 
 @dataclass
@@ -135,6 +137,13 @@ class MediaInfo:
     @property
     def has_video(self) -> bool:
         return any(s.kind == "video" for s in self.streams)
+
+    @property
+    def video_size(self) -> tuple[int, int]:
+        for s in self.streams:
+            if s.kind == "video" and s.width and s.height:
+                return s.width, s.height
+        return 0, 0
 
 
 _STREAM_RE = re.compile(r"Stream #\d+:(\d+)(?:\[[^\]]*\])?(?:\((\w+)\))?: (Video|Audio|Subtitle): (\w+)(.*)")
@@ -163,6 +172,10 @@ def probe(path: str) -> MediaInfo:
                         codec=sm.group(4), language=sm.group(2) or "",
                         description=sm.group(5).strip(" ,"))
         counters[kind] += 1
+        if kind == "video":
+            dm = re.search(r"\b(\d{2,5})x(\d{2,5})\b", st.description)
+            if dm:
+                st.width, st.height = int(dm.group(1)), int(dm.group(2))
         # Ищем title в метаданных потока
         for nxt in lines[i + 1:i + 8]:
             if "Stream #" in nxt:

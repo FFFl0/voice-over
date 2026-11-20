@@ -5,3 +5,5 @@ soundfile>=0.12
 sounddevice>=0.4.6
 edge-tts>=6.1.10
 imageio-ffmpeg>=0.4.9
+# Перевод реплик (Google Переводчик без ключа)
+deep-translator>=1.11

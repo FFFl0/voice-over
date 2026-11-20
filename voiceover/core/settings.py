@@ -29,6 +29,12 @@ class AppSettings:
     whisper_language: str = ""      # "" — автоопределение
     whisper_device: str = "auto"
     whisper_max_len: float = 7.0
+    translate_source: str = "auto"
+    translate_target: str = "ru"
+    ocr_language: str = "en"
+    ocr_mode: str = "light"
+    ocr_fps: float = 4.0
+    ocr_region: list = field(default_factory=lambda: [0.05, 0.70, 0.90, 0.28])  # left, top, w, h
     recent: list[str] = field(default_factory=list)
 
     @classmethod

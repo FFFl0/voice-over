@@ -209,11 +209,16 @@ class TimelineCanvas(QWidget):
                     p.setPen(QPen(col, 1))
                     p.setBrush(Qt.NoBrush)
                     p.drawPath(path)
-                if sel:
-                    inner = QPainterPath()
-                    inner.addRoundedRect(r.adjusted(1, 1, -1, -1), BLOCK_RADIUS - 1, BLOCK_RADIUS - 1)
-                    p.setPen(QPen(QColor(th.ink), 2))
+                if sel:   # SELECT_OUTLINE: рамка акцента снаружи блока + светлая внутренняя
+                    p.setRenderHint(QPainter.Antialiasing, True)
+                    outer = QPainterPath()
+                    outer.addRoundedRect(r.adjusted(-3, -3, 3, 3), 5, 5)
+                    p.setPen(QPen(QColor(th.accent), 2.5))
                     p.setBrush(Qt.NoBrush)
+                    p.drawPath(outer)
+                    inner = QPainterPath()
+                    inner.addRoundedRect(r.adjusted(1, 1, -1, -1), 2, 2)
+                    p.setPen(QPen(QColor(th.text), 1))
                     p.drawPath(inner)
                 p.setRenderHint(QPainter.Antialiasing, False)
                 if r.width() > 34:

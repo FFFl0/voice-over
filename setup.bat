@@ -43,18 +43,18 @@ echo.
 echo Основные модули установлены: Edge TTS, запись, сведение, экспорт.
 echo.
 
-echo Устанавливаю распознавание речи Whisper...
+echo Устанавливаю распознавание речи Whisper и OCR субтитров...
 pip install -r requirements-whisper.txt
 if errorlevel 1 goto :nowhisper
-echo Whisper установлен.
+echo Whisper и OCR установлены.
 goto :ai
 :nowhisper
 echo.
-echo Whisper установить не удалось. Программа будет работать без распознавания речи,
+echo Whisper/OCR установить не удалось. Программа будет работать без распознавания речи и текста,
 echo всё остальное доступно. Сообщения pip выше подскажут причину.
 :ai
 echo.
-choice /C YN /M "Установить AI-модули: офлайн-голоса Silero и удаление голосов Demucs (2-4 ГБ)"
+choice /C YN /M "Установить AI-модули: голоса Silero, удаление голосов Demucs, OCR для русского и японского (2-4 ГБ)"
 if errorlevel 2 goto :done
 choice /C YN /M "Есть видеокарта NVIDIA (ускорение CUDA)"
 if errorlevel 2 goto :torchcpu
