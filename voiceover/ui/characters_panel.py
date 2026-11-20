@@ -74,7 +74,12 @@ class CharactersPanel(QWidget):
                 self.engine.setItemData(self.engine.count() - 1, why, Qt.ToolTipRole)
         self.voice = QComboBox()
         self.voice.setEditable(True)
-        self.voice.setToolTip("Можно выбрать из списка или ввести ID голоса вручную")
+        self.voice.setMaxVisibleItems(20)
+        # Клик по полю открывает список голосов (ID можно и ввести вручную)
+        self.voice.lineEdit().installEventFilter(self)
+        self._voice_click_opens = True
+        self.voice.setToolTip("Нажмите, чтобы выбрать голос из списка. ID голоса Edge TTS "
+                              "можно также вписать вручную (правый клик → вставить или Ctrl+V)")
         self.rate = QSpinBox()
         self.rate.setRange(-50, 100)
         self.rate.setSuffix(" %")
@@ -134,6 +139,14 @@ class CharactersPanel(QWidget):
         self.btn_lines.clicked.connect(
             lambda: self.current() and self.filterRequested.emit(self.current().id))
         self.box.setEnabled(False)
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        if (obj is self.voice.lineEdit() and ev.type() == QEvent.MouseButtonPress
+                and self.voice.isEnabled() and not self.voice.view().isVisible()):
+            self.voice.showPopup()
+            return True
+        return super().eventFilter(obj, ev)
 
     # ---------------------------------------------------------- данные
     def set_project(self, p: Optional[Project]) -> None:
