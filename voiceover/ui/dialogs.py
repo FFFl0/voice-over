@@ -330,6 +330,11 @@ class ExportDialog(QDialog):
         self.lang = QLineEdit("rus")
         self.lang.setMaxLength(3)
         self.lang.setFixedWidth(60)
+        self.loudness = QComboBox()
+        for value, title in ffmpeg.LOUDNESS_PRESETS:
+            self.loudness.addItem(title, value)
+        self.loudness.setToolTip("Выровнять общую громкость дорожки по стандарту EBU R128, "
+                                 "чтобы все серии звучали одинаково громко")
 
         self.out_btn = QPushButton("Обзор…")
         self.out_btn.clicked.connect(self._pick)
@@ -344,6 +349,7 @@ class ExportDialog(QDialog):
         f.addRow("Битрейт:", self.bitrate)
         f.addRow("Название дорожки:", self.title)
         f.addRow("Язык (ISO 639-2):", self.lang)
+        f.addRow("Громкость:", self.loudness)
         f.addRow(self.keep_orig)
         f.addRow(self.keep_subs)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -382,6 +388,7 @@ class ExportDialog(QDialog):
 
     def options(self) -> ffmpeg.ExportOptions:
         return ffmpeg.ExportOptions(
+            loudness=self.loudness.currentData(),
             container=self.container.currentData(),
             codec=self.codec.currentData(),
             bitrate=self.bitrate.currentText(),

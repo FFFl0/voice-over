@@ -1462,9 +1462,12 @@ class MainWindow(QMainWindow):
             return
         default = str(Path(p.video_path).with_name(Path(p.video_path).stem + ".voiceover.mkv"))
         dlg = ExportDialog(default, self)
+        dlg.loudness.setCurrentIndex(max(0, dlg.loudness.findData(self.settings.export_loudness)))
         if dlg.exec() != QDialog.Accepted:
             return
         opts = dlg.options()
+        self.settings.export_loudness = opts.loudness
+        self.settings.save()
         out = dlg.out.text().strip()
         kind = dlg.kind.currentData()
         if Path(out).resolve() == Path(p.video_path).resolve():
@@ -1477,14 +1480,28 @@ class MainWindow(QMainWindow):
         mix_wav = str(p.project_dir / "mix.wav")
 
         def work(t: Task):
-            warnings = mixer.render_project(p, mix_wav, lambda f, s: t.report(f * 0.5, s),
+            warnings = mixer.render_project(p, mix_wav, lambda f, s: t.report(f * 0.45, s),
                                             t.is_cancelled)
-            prog = lambda f: t.report(0.5 + f * 0.5, "Сборка файла (FFmpeg)")  # noqa: E731
+            final_wav = mix_wav
+            if opts.loudness is not None:
+                final_wav = str(p.project_dir / "mix_loudnorm.wav")
+                m = ffmpeg.normalize_loudness(
+                    mix_wav, final_wav, opts.loudness, sample_rate=p.mix.sample_rate,
+                    duration=p.duration,
+                    progress=lambda f: t.report(0.45 + f * 0.2,
+                                                f"Громкость до {opts.loudness:g} LUFS (EBU R128)"),
+                    cancel=t.is_cancelled)
+                try:
+                    warnings.append(f"Громкость: была {float(m['input_i']):.1f} LUFS, "
+                                    f"приведена к {opts.loudness:g} LUFS")
+                except (KeyError, ValueError):
+                    pass
+            prog = lambda f: t.report(0.65 + f * 0.35, "Сборка файла (FFmpeg)")  # noqa: E731
             if kind == "video":
-                ffmpeg.mux_video(p.video_path, mix_wav, out, opts, p.audio_stream, p.duration,
+                ffmpeg.mux_video(p.video_path, final_wav, out, opts, p.audio_stream, p.duration,
                                  prog, t.is_cancelled)
             else:
-                ffmpeg.encode_audio(mix_wav, out, opts, p.duration, prog, t.is_cancelled)
+                ffmpeg.encode_audio(final_wav, out, opts, p.duration, prog, t.is_cancelled)
             return warnings
 
         def done(warnings):

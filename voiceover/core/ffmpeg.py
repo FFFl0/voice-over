@@ -234,6 +234,7 @@ class ExportOptions:
     keep_subtitles: bool = True
     track_title: str = "Многоголосая озвучка"
     language: str = "rus"
+    loudness: Optional[float] = None   # целевая громкость, LUFS (None — не менять)
 
 
 AUDIO_CODECS = {
@@ -292,3 +293,63 @@ def encode_audio(mix_wav: str, out_path: str, opts: ExportOptions,
         args += ["-metadata:s:a:0", f"title={opts.track_title}",
                  "-metadata:s:a:0", f"language={opts.language}", out_path]
     run_ffmpeg(args, duration, progress, cancel)
+
+
+# ---------------------------------------------------------------- громкость (EBU R128)
+
+LOUDNESS_PRESETS = [
+    (None, "Не менять"),
+    (-23.0, "−23 LUFS — EBU R128, телевидение (стандарт)"),
+    (-16.0, "−16 LUFS — онлайн-видео"),
+    (-14.0, "−14 LUFS — стриминговые сервисы, громче"),
+]
+
+
+def measure_loudness(wav: str, target: float = -23.0, true_peak: float = -1.0,
+                     lra: float = 11.0, cancel: Optional[CancelCb] = None) -> dict:
+    """Первый проход loudnorm: измерить интегральную громкость, пик и диапазон."""
+    import json as _json
+    cmd = [find_ffmpeg(), "-hide_banner", "-nostdin", "-nostats", "-i", wav, "-af",
+           f"loudnorm=I={target}:TP={true_peak}:LRA={lra}:print_format=json",
+           "-f", "null", "-"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace", **_popen_kwargs())
+    assert proc.stderr is not None
+    out = []
+    for ln in proc.stderr:
+        out.append(ln)
+        if cancel and cancel():
+            proc.kill()
+            proc.wait()
+            raise Cancelled()
+    proc.wait()
+    text = "".join(out)
+    start, end = text.rfind("{"), text.rfind("}")
+    if proc.returncode != 0 or start < 0 or end < start:
+        raise FFmpegError("Не удалось измерить громкость:\n" + text[-800:])
+    return _json.loads(text[start:end + 1])
+
+
+def normalize_loudness(src: str, dst: str, target: float, true_peak: float = -1.0,
+                       lra: float = 11.0, sample_rate: int = 48000, duration: float = 0.0,
+                       progress: Optional[ProgressCb] = None,
+                       cancel: Optional[CancelCb] = None) -> dict:
+    """Двухпроходная нормализация громкости к target LUFS. Возвращает измерения до обработки."""
+    m = measure_loudness(src, target, true_peak, lra, cancel)
+    if progress:
+        progress(0.5)
+    try:
+        measured_i = float(m["input_i"])
+    except (KeyError, ValueError):
+        measured_i = float("-inf")
+    if measured_i == float("-inf") or measured_i < -70:
+        # тишина — нормализовать нечего, копируем как есть
+        run_ffmpeg(["-i", src, "-c:a", "pcm_s24le", dst], duration, None, cancel)
+        return m
+    af = (f"loudnorm=I={target}:TP={true_peak}:LRA={lra}"
+          f":measured_I={m['input_i']}:measured_TP={m['input_tp']}"
+          f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}"
+          f":offset={m['target_offset']}:linear=true")
+    run_ffmpeg(["-i", src, "-af", af, "-ar", str(sample_rate), "-c:a", "pcm_s24le", dst],
+               duration, (lambda f: progress(0.5 + f * 0.5)) if progress else None, cancel)
+    return m

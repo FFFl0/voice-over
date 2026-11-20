@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Optional
 
 
 def data_dir() -> Path:
@@ -29,6 +30,7 @@ class AppSettings:
     whisper_language: str = ""      # "" — автоопределение
     whisper_device: str = "auto"
     whisper_max_len: float = 7.0
+    export_loudness: Optional[float] = -23.0   # LUFS; None — не нормализовать
     translate_source: str = "auto"
     translate_target: str = "ru"
     translate_engine: str = ""      # local | google | deepl ("" — выбрать автоматически)

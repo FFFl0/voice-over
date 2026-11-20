@@ -108,3 +108,23 @@ def test_peaks(tmp_path):
     assert len(pk) == 100 and pk[:50].max() == 0 and abs(float(pk[60]) - 0.5) < 0.01
     assert list((tmp_path / "c").glob("*.npy"))
     assert np.array_equal(compute_peaks(str(tmp_path / "w.wav"), 50, tmp_path / "c"), pk)
+
+
+def test_loudness_normalization(tmp_path):
+    from voiceover.core import ffmpeg
+    t = np.arange(SR * 6) / SR
+    quiet = (0.02 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)   # около −37 LUFS
+    src = tmp_path / "quiet.wav"
+    sf.write(src, np.stack([quiet, quiet], 1), SR)
+    before = ffmpeg.measure_loudness(str(src))
+    assert float(before["input_i"]) < -30
+    for target in (-23.0, -16.0):
+        out = tmp_path / f"norm{int(target)}.wav"
+        ffmpeg.normalize_loudness(str(src), str(out), target)
+        after = ffmpeg.measure_loudness(str(out), target)
+        assert abs(float(after["input_i"]) - target) < 1.0, after
+        assert float(after["input_tp"]) <= -0.5          # пик не выше −1 dBTP (с запасом)
+        assert abs(sf.info(str(out)).duration - 6.0) < 0.05
+    silent = tmp_path / "silent.wav"
+    sf.write(silent, np.zeros((SR, 2), np.float32), SR)
+    ffmpeg.normalize_loudness(str(silent), str(tmp_path / "s.wav"), -23.0)   # без ошибки
