@@ -327,6 +327,8 @@ class MainWindow(QMainWindow):
         self.a_export = act("Экспорт", self.export, "Ctrl+E", "export",
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
+        self.a_piper_dir = act("Папка своих голосов Piper…", self.open_piper_dir, None, None,
+                               "Положите сюда .onnx и .onnx.json голоса Piper — он появится в списке голосов")
         self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
         self.a_quit = act("Выход", self.close, "Ctrl+Q")
         self.a_undo = act("Отменить", self.undo, QKeySequence.Undo, "undo")
@@ -361,6 +363,7 @@ class MainWindow(QMainWindow):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_settings)
+        m.addAction(self.a_piper_dir)
         m.addAction(self.a_quit)
 
         m = mb.addMenu("&Правка")
@@ -1483,6 +1486,15 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     # ================================================================ прочее
+    def open_piper_dir(self):
+        from PySide6.QtCore import QUrl as _QUrl
+        from PySide6.QtGui import QDesktopServices
+        from ..tts.piper import voices_dir
+        d = voices_dir()
+        QDesktopServices.openUrl(_QUrl.fromLocalFile(str(d)))
+        self.statusBar().showMessage(
+            f"Голоса Piper: {d}. Добавленные голоса появятся в списке после выбора персонажа.", 10000)
+
     def open_settings(self):
         SettingsDialog(self.settings, self).exec()
         ffmpeg.set_ffmpeg_path(self.settings.ffmpeg_path)

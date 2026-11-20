@@ -19,6 +19,11 @@ try:  # Piper: словари espeak-ng внутри пакета
     hidden += collect_submodules("piper")
 except ImportError:
     pass
+try:  # Vosk TTS
+    import vosk_tts  # noqa: F401
+    hidden += collect_submodules("vosk_tts")
+except ImportError:
+    pass
 try:  # OCR (RapidOCR): модели лежат внутри пакета
     import rapidocr_onnxruntime  # noqa: F401
     datas += collect_data_files("rapidocr_onnxruntime")

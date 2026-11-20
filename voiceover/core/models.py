@@ -35,6 +35,7 @@ class Engine(str, Enum):
     EDGE = "edge"
     SILERO = "silero"
     PIPER = "piper"
+    VOSK = "vosk"
 
 
 def new_id() -> str:

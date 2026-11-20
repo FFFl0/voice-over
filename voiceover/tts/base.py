@@ -67,7 +67,8 @@ def _registry() -> dict[str, TTSEngine]:
         from .edge import EdgeEngine
         from .piper import PiperEngine
         from .silero import SileroEngine
-        for e in (EdgeEngine(), PiperEngine(), SileroEngine()):
+        from .vosk import VoskEngine
+        for e in (EdgeEngine(), PiperEngine(), VoskEngine(), SileroEngine()):
             _ENGINES[e.id] = e
     return _ENGINES
 

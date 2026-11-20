@@ -70,6 +70,32 @@ def download_voice(voice_id: str) -> Path:
     return model
 
 
+def custom_voices() -> list[Voice]:
+    """Голоса, добавленные пользователем: любые .onnx + .onnx.json в папке голосов Piper.
+    У многоголосых моделей каждый голос — отдельный пункт («модель#номер»)."""
+    import json
+    known = {v.id for v in VOICES}
+    out: list[Voice] = []
+    for model in sorted(voices_dir().glob("*.onnx")):
+        vid = model.name[:-5]
+        cfg_path = model.with_name(model.name + ".json")
+        if vid in known or not cfg_path.exists():
+            continue
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        lang = str((cfg.get("language") or {}).get("code", "")).split("_")[0] or "ru"
+        n = int(cfg.get("num_speakers") or 1)
+        if n <= 1:
+            out.append(Voice(vid, f"{vid} (свой)", "", lang))
+        else:
+            names = {i: s for s, i in (cfg.get("speaker_id_map") or {}).items()}
+            for k in range(n):
+                out.append(Voice(f"{vid}#{k}", f"{vid}: {names.get(k, k + 1)} (свой)", "", lang))
+    return out
+
+
 def pitch_factor(pitch: int) -> float:
     """Ползунок «Высота» (−50…+50, как у Edge в Гц) → множитель тона ±33%."""
     return max(0.6, min(1.5, 1.0 + pitch / 150.0))
@@ -106,15 +132,18 @@ class PiperEngine(TTSEngine):
         return True, ""
 
     def voices(self) -> list[Voice]:
-        return list(VOICES)
+        return list(VOICES) + custom_voices()
 
     def _voice(self, voice_id: str):
-        v = self._loaded.get(voice_id)
+        model_id = voice_id.split("#", 1)[0]
+        v = self._loaded.get(model_id)
         if v is None:
             from piper import PiperVoice
-            model = download_voice(voice_id)
+            model, cfg = voice_files(model_id)
+            if not (model.exists() and cfg.exists()):
+                model = download_voice(model_id)
             v = PiperVoice.load(str(model))
-            self._loaded[voice_id] = v
+            self._loaded[model_id] = v
         return v
 
     def synthesize(self, text: str, voice: str, out_path: str,
@@ -128,7 +157,10 @@ class PiperEngine(TTSEngine):
             from piper import SynthesisConfig
             # темп: +50% → длительность ×0.67; −50% → ×2
             length_scale = 1.0 / max(0.5, 1.0 + rate / 100.0)
+            speaker = int(voice.split("#", 1)[1]) if "#" in voice else None
             cfg = SynthesisConfig(length_scale=length_scale)
+            if speaker is not None:
+                cfg.speaker_id = speaker
             with wave.open(out, "wb") as wf:
                 v.synthesize_wav(text, wf, syn_config=cfg)
         shift_pitch(out, pitch_factor(pitch))

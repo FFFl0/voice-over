@@ -412,7 +412,7 @@ def preferred_engine(project: Project, exclude: Optional[Character] = None) -> s
             counts[x.engine.value] = counts.get(x.engine.value, 0) + 1
     if counts:
         return max(counts, key=counts.get)
-    for eid in ("edge", "piper", "silero"):
+    for eid in ("edge", "piper", "vosk", "silero"):
         if get_engine(eid).available()[0]:
             return eid
     return "edge"

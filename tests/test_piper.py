@@ -92,3 +92,32 @@ def test_download_voice(monkeypatch, tmp_path):
                              "ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx")
     P.download_voice("ru_RU-dmitri-medium")
     assert len(got) == 2                                   # повторно не качает
+
+
+def test_custom_voices(monkeypatch, tmp_path, fake_piper):
+    import json
+    monkeypatch.setattr(P, "voices_dir", lambda: tmp_path)
+    (tmp_path / "ru_RU-myvoice-medium.onnx").write_bytes(b"x")
+    (tmp_path / "ru_RU-myvoice-medium.onnx.json").write_text(json.dumps(
+        {"language": {"code": "ru_RU"}, "num_speakers": 1}))
+    (tmp_path / "ru_RU-cast-medium.onnx").write_bytes(b"x")
+    (tmp_path / "ru_RU-cast-medium.onnx.json").write_text(json.dumps(
+        {"language": {"code": "ru_RU"}, "num_speakers": 3, "speaker_id_map": {"anna": 0, "boris": 1}}))
+    (tmp_path / "broken.onnx").write_bytes(b"x")          # без .json — пропускается
+    ids = [v.id for v in P.custom_voices()]
+    assert ids == ["ru_RU-cast-medium#0", "ru_RU-cast-medium#1", "ru_RU-cast-medium#2",
+                   "ru_RU-myvoice-medium"]
+    names = [v.name for v in P.custom_voices()]
+    assert names[0] == "ru_RU-cast-medium: anna (свой)" and names[2].endswith("3 (свой)")
+    eng = P.PiperEngine()
+    assert len(eng.voices()) == len(P.VOICES) + 4
+    seen = {}
+
+    class SpkVoice(FakeVoice):
+        def synthesize_wav(self, text, wf, syn_config=None, **kw):
+            seen["speaker"] = getattr(syn_config, "speaker_id", None)
+            super().synthesize_wav(text, wf, syn_config, **kw)
+
+    monkeypatch.setattr(sys.modules["piper"], "PiperVoice", SpkVoice)
+    eng.synthesize("Привет", "ru_RU-cast-medium#1", str(tmp_path / "o"))
+    assert seen["speaker"] == 1
