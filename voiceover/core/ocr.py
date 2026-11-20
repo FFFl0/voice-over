@@ -34,9 +34,10 @@ LANGUAGES = [
     ("de", "Немецкий", ("easyocr",)),
     ("fr", "Французский", ("easyocr",)),
     ("es", "Испанский", ("easyocr",)),
+    ("vi", "Вьетнамский", ("easyocr",)),
 ]
 EASYOCR_CODES = {"zh": "ch_sim", "ja": "ja", "ko": "ko", "ru": "ru", "en": "en",
-                 "uk": "uk", "de": "de", "fr": "fr", "es": "es"}
+                 "uk": "uk", "de": "de", "fr": "fr", "es": "es", "vi": "vi"}
 
 MODES = [("light", "Светлый текст с обводкой (обычные субтитры)"),
          ("dark", "Тёмный текст на светлом"),

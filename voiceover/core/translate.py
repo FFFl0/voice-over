@@ -258,6 +258,11 @@ def nllb_downloaded(size: str) -> bool:
 def ensure_nllb(size: str, progress: Optional[Callable[[str], None]] = None):
     """Скачать модель (один раз). Возвращает папку модели."""
     from huggingface_hub import hf_hub_download, snapshot_download
+    try:  # без консоли полоса прогресса не может писать в stderr
+        from huggingface_hub.utils import disable_progress_bars
+        disable_progress_bars()
+    except Exception:  # noqa: BLE001
+        pass
     d = nllb_dir(size)
     d.mkdir(parents=True, exist_ok=True)
     errors = []
@@ -281,8 +286,15 @@ def ensure_nllb(size: str, progress: Optional[Callable[[str], None]] = None):
     return d
 
 
+VI_CHARS = set("ăâđêôơưĂÂĐÊÔƠƯ")
+
+
 def detect_lang(text: str) -> str:
-    """Грубое определение языка по письменности (для источника «авто» в NLLB)."""
+    """Грубое определение языка по письменности (для источника «авто» в NLLB).
+    Латиница различается только для вьетнамского (по его особым буквам); остальные
+    языки на латинице считаются английским — для них лучше выбрать язык явно."""
+    if any(ch in VI_CHARS or 0x1EA0 <= ord(ch) <= 0x1EF9 for ch in text):
+        return "vi"
     kana = han = hangul = cyr = latin = 0
     for ch in text:
         o = ord(ch)

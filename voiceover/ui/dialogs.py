@@ -586,6 +586,7 @@ class TranslateDialog(QDialog):
         self.key.setEchoMode(QLineEdit.Password)
         self.engine_note = QLabel()
         self.engine_note.setWordWrap(True)
+        self.engine_note.setOpenExternalLinks(True)
         note = QLabel("Текст оригинала сохраняется в реплике, вернуть его можно через контекстное "
                       "меню таблицы или «Отменить». Озвучка переведённых реплик станет «устаревшей».")
         note.setWordWrap(True)
@@ -634,7 +635,9 @@ class TranslateDialog(QDialog):
                 text = ("При первом запуске модель скачается (один раз), дальше интернет не нужен. "
                         "Лицензия модели — некоммерческое использование.")
         elif eng == "deepl":
-            text = "Высокое качество, 500 000 символов в месяц бесплатно. Ключ хранится в настройках программы."
+            text = ("Высокое качество, 500 000 символов в месяц бесплатно. Ключ: зарегистрируйтесь на "
+                    f"<a href='https://www.deepl.com/pro-api' style='color:{th.accent}'>deepl.com/pro-api</a> "
+                    "(тариф «DeepL API Free»), затем «Аккаунт → Ключи API». Ключ хранится в настройках программы.")
         else:
             text = ("Бесплатно, но Google может временно заблокировать перевод после "
                     "большого числа запросов.")

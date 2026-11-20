@@ -177,3 +177,27 @@ def test_deepl_batches_and_errors():
     with pytest.raises(PartialTranslation) as ei:
         T.translate_texts(["x"], bad)
     assert "лимит" in str(ei.value)
+
+
+def test_detect_vietnamese():
+    assert T.detect_lang("Hiện giờ, mình đang đi du lịch khắp nơi để dạy bóng đá cho trẻ em.") == "vi"
+    assert T.detect_lang("Đi đâu?") == "vi"
+    assert T.detect_lang("Where are you going?") == "en"
+
+
+def test_std_streams_without_console(monkeypatch, tmp_path):
+    """pythonw: stderr = None — загрузчики с полосой прогресса не должны падать."""
+    import sys
+    from voiceover import app
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    app.ensure_std_streams()
+    assert sys.stderr is not None and sys.stdout is not None
+    from tqdm import tqdm
+    for _ in tqdm(range(3), disable=False, file=None):   # как в huggingface_hub/vosk-tts
+        pass
+    print("в журнал")
+    sys.stdout.flush()
+    log = tmp_path / "VoiceOverStudio" / "voiceover.log"
+    assert "в журнал" in log.read_text(encoding="utf-8")
