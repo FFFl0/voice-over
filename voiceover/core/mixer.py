@@ -19,6 +19,8 @@ CancelCb = Callable[[], bool]
 
 TARGET_RMS_DB = -20.0
 SILENCE_DB = -45.0
+DUB_PAD = 0.25    # запас вокруг реплики, где голос оригинала ещё удаляется, с
+DUB_FADE = 0.2    # плавный переход фон ↔ оригинал, с
 CHUNK_SEC = 20.0
 
 
@@ -197,6 +199,23 @@ def duck_envelope(t0: float, n: int, sr: int, intervals: list[tuple[float, float
     return env
 
 
+def _blend_original(orig_file: sf.SoundFile, bg: np.ndarray, pos: int, t0: float, sr: int,
+                    speech: list[tuple[float, float]]) -> np.ndarray:
+    """Фон без голосов под репликами, оригинал — вне их (с плавными переходами)."""
+    env = duck_envelope(t0, len(bg), sr, speech, DUB_FADE, DUB_FADE)
+    if env.min() >= 1.0:
+        return bg
+    o = np.zeros_like(bg)
+    if pos < orig_file.frames:
+        orig_file.seek(pos)
+        d = orig_file.read(len(bg), dtype="float32", always_2d=True)
+        if d.shape[1] == 1:
+            d = np.repeat(d, 2, axis=1)
+        o[: len(d)] = d[:, :2]
+    e = env[:, None]
+    return bg * e + o * (1.0 - e)
+
+
 def background_path(project: Project) -> Optional[Path]:
     if project.mix.mode == MixMode.DUBBING:
         return project.resolve(project.background_wav)
@@ -211,6 +230,7 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
     sr = project.mix.sample_rate
     mix = project.mix
     bg_file: Optional[sf.SoundFile] = None
+    orig_file: Optional[sf.SoundFile] = None   # дубляж: оригинал там, где нет реплик
     if include_background:
         bp = background_path(project)
         if bp is None or not bp.exists():
@@ -221,6 +241,13 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
         bg_file = sf.SoundFile(str(bp))
         if bg_file.samplerate != sr:
             raise RuntimeError(f"Частота фона {bg_file.samplerate} Гц не совпадает с {sr} Гц")
+        if mix.mode == MixMode.DUBBING and mix.dub_only_lines:
+            op = project.resolve(project.original_wav)
+            if op is not None and op.exists():
+                orig_file = sf.SoundFile(str(op))
+                if orig_file.samplerate != sr:
+                    orig_file.close()
+                    orig_file = None
 
     total = project.duration
     if bg_file is not None:
@@ -231,6 +258,11 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
     t_from = max(0.0, t_from)
 
     intervals = _merge_intervals([(c.start, c.end(sr)) for c in clips], 0.3)
+    # где звучал голос оригинала: все включённые реплики (и с записью, и без)
+    speech = _merge_intervals(sorted(
+        [(ln.start - DUB_PAD, ln.end + DUB_PAD) for ln in project.lines
+         if ln.enabled and (ln.text.strip() or ln.rec_path)]
+        + [(c.start, c.end(sr)) for c in clips]), 0.5)
     duck_lin = db_to_lin(mix.duck_db)
     bg_gain = db_to_lin(mix.background_db)
     clip_files: dict[str, sf.SoundFile] = {}
@@ -252,7 +284,10 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
                     bg = bg_file.read(n, dtype="float32", always_2d=True)
                     if bg.shape[1] == 1:
                         bg = np.repeat(bg, 2, axis=1)
-                    bg = bg[:, :2] * bg_gain
+                    bg = bg[:, :2]
+                    if orig_file is not None:
+                        bg = _blend_original(orig_file, bg, pos, t0, sr, speech)
+                    bg = bg * bg_gain
                     if mix.mode == MixMode.VOICEOVER and mix.duck_db < 0:
                         env = duck_envelope(t0, len(bg), sr, intervals,
                                             mix.duck_attack, mix.duck_release)
@@ -284,6 +319,8 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
     finally:
         if bg_file is not None:
             bg_file.close()
+        if orig_file is not None:
+            orig_file.close()
         for f in clip_files.values():
             f.close()
 

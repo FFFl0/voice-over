@@ -127,3 +127,31 @@ def test_loudness_normalization(tmp_path):
     silent = tmp_path / "silent.wav"
     sf.write(silent, np.zeros((SR, 2), np.float32), SR)
     ffmpeg.normalize_loudness(str(silent), str(tmp_path / "s.wav"), -23.0)   # без ошибки
+
+
+def test_dubbing_keeps_original_outside_lines(tmp_path):
+    """Demucs «съел» весь звук: вне реплик должен звучать оригинал, под репликами — фон."""
+    p = make_project(tmp_path)
+    p.mix.mode = MixMode.DUBBING
+    sf.write(p.project_dir / "bg.wav", np.zeros((6 * SR, 2), np.float32), SR)
+    p.background_wav = "bg.wav"
+    out = tmp_path / "dub.wav"
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    def orig_level(a, b):   # уровень тона оригинала 100 Гц (голос записи — 800 Гц)
+        seg = y[int(a * SR): int(b * SR), 0]
+        spec = np.abs(np.fft.rfft(seg)) * 2 / len(seg)
+        return float(spec[np.argmin(np.abs(np.fft.rfftfreq(len(seg), 1 / SR) - 100))])
+    assert orig_level(4.0, 5.5) > 0.15   # реплик нет — оригинал (тон 0.2) на месте
+    assert orig_level(1.3, 2.8) < 1e-3   # под репликами — только фон без голосов
+    # без галочки — как раньше: только фон
+    p.mix.dub_only_lines = False
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert float(np.abs(y[4 * SR: 5 * SR]).max()) < 1e-3
+
+
+def test_old_mix_settings_default_only_lines():
+    from voiceover.core.models import MixSettings
+    m = MixSettings.from_dict({"mode": "dubbing"})
+    assert m.dub_only_lines and MixSettings.from_dict(m.to_dict()).dub_only_lines

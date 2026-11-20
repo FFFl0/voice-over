@@ -222,11 +222,16 @@ class MixPanel(QWidget):
         self.bg = self._spin(-40, 12, " дБ", "Громкость оригинала / фона")
         self.voices = self._spin(-30, 20, " дБ", "Общая громкость голосов")
         self.normalize = QCheckBox("Выравнивать громкость записей")
+        self.only_lines = QCheckBox("Убирать голоса только под репликами")
+        self.only_lines.setToolTip(
+            "Вне реплик звучит оригинал. Нейросеть иногда принимает за голос крики, "
+            "дыхание, шум толпы и тихий фон — без этой галочки в таких местах звук пропадает.")
         self.bg_status = QLabel()
         self.bg_status.setWordWrap(True)
         f = QFormLayout(self)
         f.addRow("Режим:", self.mode)
         f.addRow(self.bg_status)
+        f.addRow(self.only_lines)
         f.addRow("Приглушение оригинала:", self.duck)
         f.addRow("Атака:", self.attack)
         f.addRow("Восстановление:", self.release)
@@ -235,6 +240,7 @@ class MixPanel(QWidget):
         f.addRow(self.normalize)
         self.mode.currentIndexChanged.connect(self._save)
         self.normalize.toggled.connect(self._save)
+        self.only_lines.toggled.connect(self._save)
         self.setEnabled(False)
 
     def _spin(self, lo, hi, suffix, tip, step=1.0):
@@ -258,6 +264,7 @@ class MixPanel(QWidget):
         self.bg.setValue(mix.background_db)
         self.voices.setValue(mix.voices_db)
         self.normalize.setChecked(mix.normalize_voices)
+        self.only_lines.setChecked(mix.dub_only_lines)
         self.mix = mix
         self.set_background_status(has_background)
         self._update()
@@ -270,6 +277,7 @@ class MixPanel(QWidget):
         dub = self.mode.currentData() == MixMode.DUBBING.value
         for w in (self.duck, self.attack, self.release):
             w.setEnabled(not dub)
+        self.only_lines.setVisible(dub)
         if dub:
             if getattr(self, "_has_bg", False):
                 self.bg_status.setText("✔ Фон без голосов готов.")
@@ -292,6 +300,7 @@ class MixPanel(QWidget):
         m.background_db = self.bg.value()
         m.voices_db = self.voices.value()
         m.normalize_voices = self.normalize.isChecked()
+        m.dub_only_lines = self.only_lines.isChecked()
         self._update()
         if self.on_change:
             self.on_change()
