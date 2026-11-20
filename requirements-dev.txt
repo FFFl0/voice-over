@@ -1,3 +1,4 @@
 -r requirements.txt
+-r requirements-whisper.txt
 pytest>=7
 pyinstaller>=6.3
