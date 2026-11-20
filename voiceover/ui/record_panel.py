@@ -8,7 +8,6 @@ from typing import Callable, Optional
 
 import soundfile as sf
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame,
                                QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
@@ -62,25 +61,31 @@ class RecordPanel(QWidget):
         self.prev_lbl.setObjectName("muted")
         self.prev_lbl.setWordWrap(True)
         self.who = QLabel()
+        self.who.setObjectName("itemTitle")
+        self.when = QLabel()
+        self.when.setObjectName("muted")
+        self.when.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
+        self.length = QLabel()
+        self.length.setObjectName("muted")
+        self.length.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
+        self.note = QLabel()
+        self.note.setObjectName("muted")
+        self.note.setWordWrap(True)
         self.prompt = QLabel("Выберите реплику в таблице")
-        f = QFont(self.font())
-        f.setPointSizeF(f.pointSizeF() * 1.6)
-        self.prompt.setFont(f)
-        self.prompt.setWordWrap(True)
-        self.prompt.setMinimumHeight(70)
-        self.prompt.setAlignment(Qt.AlignCenter)
         self.prompt.setObjectName("promptText")
-        self.prompt.setStyleSheet("padding:14px; font-size:18pt; font-weight:500")
+        self.prompt.setWordWrap(True)
+        self.prompt.setMinimumHeight(110)
+        self.prompt.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.next_lbl = QLabel()
         self.next_lbl.setObjectName("muted")
         self.next_lbl.setWordWrap(True)
+        # Отсчёт — метр (2 px): до начала реплики заполняется преролл, затем сама реплика
         self.countdown = QLabel()
-        self.countdown.setAlignment(Qt.AlignCenter)
-        cf = QFont(self.font())
-        cf.setPointSizeF(cf.pointSizeF() * 1.4)
-        cf.setBold(True)
-        self.countdown.setFont(cf)
-        self.countdown.setStyleSheet("font-size:14pt; font-weight:700")
+        self.countdown.setObjectName("countdown")
+        self.meter = QProgressBar()
+        self.meter.setRange(0, 1000)
+        self.meter.setValue(0)
+        self.meter.setTextVisible(False)
 
         self.btn_rec = QPushButton(theme.icon("record", theme.current().danger), " Записать (R)")
         self.btn_rec.setProperty("danger", True)
@@ -123,13 +128,24 @@ class RecordPanel(QWidget):
         take.addWidget(self.btn_del)
 
         card = QFrame()
-        card.setObjectName("prompt")
+        card.setObjectName("well")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(16, 12, 16, 12)
-        cl.addWidget(self.who)
+        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setSpacing(6)
+        head = QHBoxLayout()
+        head.addWidget(self.who)
+        head.addStretch(1)
+        head.addWidget(self.when)
+        head.addSpacing(16)
+        head.addWidget(self.length)
+        cl.addLayout(head)
+        cl.addWidget(self.note)
+        cl.addSpacing(6)
         cl.addWidget(self.prev_lbl)
         cl.addWidget(self.prompt)
         cl.addWidget(self.next_lbl)
+        cl.addSpacing(8)
+        cl.addWidget(self.meter)
         cl.addWidget(self.countdown)
 
         lay = QVBoxLayout(self)
@@ -213,22 +229,26 @@ class RecordPanel(QWidget):
         self.line = ln
         if ln is None or not self.project:
             self.prompt.setText("Выберите реплику в таблице")
-            self.who.setText("")
-            self.prev_lbl.setText("")
-            self.next_lbl.setText("")
+            for w in (self.who, self.when, self.length, self.note, self.prev_lbl, self.next_lbl):
+                w.setText("")
         else:
             ch = self.project.character(ln.character_id)
             who = ch.name if ch else "без роли"
             if ch and ch.actor:
                 who += f" — {ch.actor}"
-            muted = theme.current().muted
-            self.who.setText(f"<span style='color:{ch.color if ch else muted};font-size:13pt'>●</span> "
-                             f"<b>{who}</b> &nbsp; <span style='color:{muted}'>"
-                             f"{ln.start:.2f}–{ln.end:.2f} с · {ln.duration:.1f} с</span>"
-                             + (f"<br><i style='color:{muted}'>{ln.note}</i>" if ln.note else ""))
+            self.who.setText(who)
+            # цвет роли — данные проекта, а не цвет интерфейса
+            self.who.setStyleSheet(
+                f"color:{theme.role_text(ch.color, theme.current().paper3)}" if ch else "")
+            self.when.setText(f"{ln.start:.2f}–{ln.end:.2f} с")
+            self.length.setText(f"{ln.duration:.1f} с")
+            self.note.setText(ln.note)
+            self.note.setVisible(bool(ln.note))
             self.prompt.setText(ln.text)
-            self.prev_lbl.setText(f"↑ {prev_text}" if prev_text else "")
-            self.next_lbl.setText(f"↓ {next_text}" if next_text else "")
+            self.prev_lbl.setText(f"Перед этим: {prev_text}" if prev_text else "")
+            self.next_lbl.setText(f"Дальше: {next_text}" if next_text else "")
+            self.meter.setValue(0)
+            self.countdown.setText("")
             self.offset.blockSignals(True)
             self.offset.setValue(ln.rec_offset)
             self.offset.blockSignals(False)
@@ -321,14 +341,20 @@ class RecordPanel(QWidget):
             return
         t = self.player.position()
         to_start = self.line.start - t
+        th = theme.current()
         if to_start > 0.05:
-            self.countdown.setText(f"Приготовьтесь… {to_start:.1f}")
-            self.countdown.setStyleSheet(f"color:{theme.current().warn}; font-size:14pt; font-weight:700")
+            pre = max(0.01, self.line.start - self._rec_start)
+            self.meter.setValue(int(1000 * (1 - to_start / pre)))
+            self.countdown.setText(f"Приготовьтесь, {to_start:.1f} с")
+            self.countdown.setStyleSheet(f"color:{th.muted}")
         elif t <= self.line.end:
-            self.countdown.setText("● ГОВОРИТЕ")
-            self.countdown.setStyleSheet(f"color:{theme.current().danger}; font-size:14pt; font-weight:700")
+            self.meter.setValue(int(1000 * (t - self.line.start) / max(0.01, self.line.duration)))
+            self.countdown.setText("Говорите")
+            self.countdown.setStyleSheet(f"color:{th.ink}")
         else:
-            self.countdown.setText("● запись…")
+            self.meter.setValue(1000)
+            self.countdown.setText("Запись идёт, можно остановить")
+            self.countdown.setStyleSheet(f"color:{th.muted}")
         if self.auto_stop.isChecked() and t > self.line.end + self.settings.record_postroll:
             self.stop_recording()
         # страховка, если видео не загружено

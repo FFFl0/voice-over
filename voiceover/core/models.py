@@ -13,11 +13,11 @@ from typing import Optional
 PROJECT_EXT = ".vop"
 PROJECT_VERSION = 1
 
-# Палитра для новых персонажей
+# Палитра для новых персонажей: тональный ночной набор (совпадает с ui.theme.CHARACTER_PALETTE)
 CHARACTER_COLORS = [
-    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4",
-    "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff", "#9a6324",
-    "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075",
+    "#63bde7", "#bba2ea", "#ec9695", "#7fc48e", "#e2a16b", "#de97c6", "#52c6c0", "#c0b360",
+    "#8ab2f4", "#ea9a7e", "#cf9bdb", "#a8bb6d", "#3a98c0", "#967dc2", "#c47171", "#5a9e6a",
+    "#bb7c46", "#b772a0", "#1da09a", "#9b8d3a", "#668ccc", "#c2755a", "#a877b4", "#849548",
 ]
 
 
@@ -44,7 +44,7 @@ def new_id() -> str:
 class Character:
     name: str
     id: str = field(default_factory=new_id)
-    color: str = "#4363d8"
+    color: str = "#63bde7"
     source: LineSource = LineSource.TTS
     engine: Engine = Engine.EDGE
     voice: str = "ru-RU-DmitryNeural"

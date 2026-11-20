@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 full = os.environ.get("VO_FULL") == "1"
 datas = collect_data_files("imageio_ffmpeg", include_py_files=False)
+datas += [("voiceover/assets", "voiceover/assets")]  # шрифт Manrope (OFL) и значок
 hidden = collect_submodules("edge_tts")
 try:  # Whisper необязателен: без него сборка проходит, распознавание просто недоступно
     import faster_whisper  # noqa: F401

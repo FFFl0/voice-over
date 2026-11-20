@@ -1,0 +1,55 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "restyle",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "midnight",
+  "axes": "dark/grotesk-sans/cool-neutral",
+  "hero": "none (app)",
+  "nav": "kept",
+  "footer": "kept",
+  "imagery": "product only",
+  "photos": [],
+  "entry": "kept",
+  "fingerprint": "midnight-slate-manrope-r4",
+  "sections": [
+   "kept"
+  ],
+  "signature": "kept: the cue under the picture",
+  "waived": [
+   "26a",
+   "theme-light",
+   "user: lighter warmer ground, radius 4/6, Manrope"
+  ],
+  "prompt": "desktop studio for multi-voice dubbing",
+  "date": "2026-11-19"
+ },
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "midnight",
+  "axes": "dark/grotesk-sans/cool",
+  "hero": "none (app)",
+  "nav": "top bar, grouped by stage",
+  "footer": "status bar",
+  "imagery": "product only",
+  "photos": [],
+  "entry": "welcome column",
+  "fingerprint": "midnight-app-cue",
+  "sections": [
+   "welcome",
+   "editor: player+cue, lines, characters, recording, mix, timeline"
+  ],
+  "signature": "the cue under the picture in the wide light cut, lane lit on the timeline",
+  "waived": [
+   "26a",
+   "theme-light",
+   "faces: Unbounded+Golos Text for Cyrillic"
+  ],
+  "prompt": "desktop studio for multi-voice dubbing",
+  "date": "2026-11-19"
+ }
+]

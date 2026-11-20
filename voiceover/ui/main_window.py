@@ -78,15 +78,20 @@ class MainWindow(QMainWindow):
         self.clip_player.setAudioOutput(self.clip_audio)
 
         # Строка «сейчас звучит» под видео
+        # Сигнатура: реплика, которая звучит сейчас, под кадром — широким светлым срезом
         self.now_bar = QFrame()
-        self.now_bar.setObjectName("nowLine")
+        self.now_bar.setObjectName("cue")
+        self.cue_who = QLabel()
+        self.cue_who.setObjectName("cueWho")
         self.now_lbl = QLabel()
+        self.now_lbl.setObjectName("cueText")
         self.now_lbl.setWordWrap(True)
-        self.now_lbl.setMinimumHeight(44)
-        self.now_lbl.setAlignment(Qt.AlignCenter)
-        self.now_lbl.setStyleSheet("font-size:12.5pt")
+        self.now_lbl.setMinimumHeight(56)
+        self.now_lbl.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         nl = QVBoxLayout(self.now_bar)
-        nl.setContentsMargins(12, 6, 12, 6)
+        nl.setContentsMargins(20, 12, 20, 14)
+        nl.setSpacing(4)
+        nl.addWidget(self.cue_who)
         nl.addWidget(self.now_lbl)
         left = QWidget()
         ll0 = QVBoxLayout(left)
@@ -150,7 +155,6 @@ class MainWindow(QMainWindow):
         self.b_play.setToolTip("Прослушать синтез/запись выделенной реплики (P)")
         self.b_synth = QPushButton(" Синтез")
         self.b_synth.setToolTip("Синтезировать выделенные реплики (Ctrl+Enter)")
-        self.b_synth.setProperty("primary", True)
         self.b_add.clicked.connect(self.add_line)
         self.b_del.clicked.connect(self.delete_lines)
         self.b_play.clicked.connect(self.play_selected_clip)
@@ -177,12 +181,30 @@ class MainWindow(QMainWindow):
         self.orig_lbl.hide()
         self.note_edit = QLineEdit()
         self.note_edit.setPlaceholderText("Заметка для актёра: интонация, ударение…")
-        self.stats = QLabel()
-        self.stats.setObjectName("muted")
+        # Сводка готовности: числа отдельно, каждое со своей подписью
+        self.stats = QWidget()
+        sl = QHBoxLayout(self.stats)
+        sl.setContentsMargins(0, 6, 0, 0)
+        sl.setSpacing(28)
+        self.stat_labels: dict[str, QLabel] = {}
+        for key, caption in (("ready", "готово"), ("none", "нет звука"), ("stale", "устарели"),
+                             ("nochar", "без роли")):
+            box = QVBoxLayout()
+            box.setSpacing(0)
+            fig = QLabel("0")
+            fig.setObjectName("figure")
+            fig.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
+            cap = QLabel(caption)
+            cap.setObjectName("label")
+            box.addWidget(fig)
+            box.addWidget(cap)
+            sl.addLayout(box)
+            self.stat_labels[key] = fig
+        sl.addStretch(1)
 
         lines_tab = QWidget()
         ll = QVBoxLayout(lines_tab)
-        ll.setContentsMargins(12, 12, 12, 10)
+        ll.setContentsMargins(16, 14, 16, 12)
         ll.setSpacing(8)
         ll.addLayout(filt)
         ll.addWidget(self.table, 1)
@@ -223,7 +245,7 @@ class MainWindow(QMainWindow):
         editor.setStretchFactor(0, 4)
         editor.setStretchFactor(1, 1)
         editor.setSizes([640, 240])
-        editor.setContentsMargins(6, 6, 6, 0)
+
 
         self.welcome = WelcomePage()
         self.welcome.newRequested.connect(self.new_project)
@@ -386,10 +408,15 @@ class MainWindow(QMainWindow):
         for a in (self.a_undo, self.a_redo):
             tb.addAction(a)
             tb.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonIconOnly)
-        tb.addSeparator()
-        for a in (self.a_import, self.a_whisper, self.a_ocr, self.a_translate, self.a_separate,
-                  self.a_synth_all, self.a_preview):
-            tb.addAction(a)
+        for title, actions in (("Текст", (self.a_import, self.a_whisper, self.a_ocr, self.a_translate)),
+                               ("Звук", (self.a_separate, self.a_synth_all)),
+                               ("Проверка", (self.a_preview,))):
+            tb.addSeparator()
+            lbl = QLabel(title)
+            lbl.setObjectName("groupLabel")
+            tb.addWidget(lbl)
+            for a in actions:
+                tb.addAction(a)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -435,7 +462,7 @@ class MainWindow(QMainWindow):
         self.b_add.setIcon(theme.icon("plus"))
         self.b_del.setIcon(theme.icon("trash"))
         self.b_play.setIcon(theme.icon("headphones"))
-        self.b_synth.setIcon(theme.icon("synth", th.accent_text))
+        self.b_synth.setIcon(theme.icon("synth"))
         self.tabs.setTabIcon(0, theme.icon("list"))
         self.tabs.setTabIcon(1, theme.icon("users"))
         self.tabs.setTabIcon(2, theme.icon("mic"))
@@ -555,18 +582,21 @@ class MainWindow(QMainWindow):
 
     def _update_stats(self):
         if not self.project:
-            self.stats.setText("")
+            for lbl in self.stat_labels.values():
+                lbl.setText("0")
             return
         counts: dict[str, int] = {}
         for ln in self.project.lines:
-            s = line_status(self.project, ln)
-            counts[s] = counts.get(s, 0) + 1
+            st = line_status(self.project, ln)
+            counts[st] = counts.get(st, 0) + 1
         total = len(self.project.lines)
         ready = counts.get("ok", 0) + counts.get("rec", 0)
-        pct = int(ready * 100 / total) if total else 0
-        self.stats.setText(
-            f"Готово {ready} из {total} ({pct}%)  ·  нет звука: {counts.get('none', 0)}  ·  "
-            f"устарели: {counts.get('stale', 0)}  ·  без роли: {counts.get('nochar', 0)}")
+        self.stat_labels["ready"].setText(f"{ready} из {total}")
+        for key in ("none", "stale", "nochar"):
+            self.stat_labels[key].setText(str(counts.get(key, 0)))
+        th = theme.current()
+        for key, col in (("none", th.error), ("stale", th.warn)):
+            self.stat_labels[key].setStyleSheet(f"color:{col}" if counts.get(key) else "")
 
     def refresh_all(self):
         self.lines_model.reset()
@@ -599,22 +629,31 @@ class MainWindow(QMainWindow):
 
     def _update_now_line(self, t: float):
         if not self.project:
+            self.cue_who.setText("")
             self.now_lbl.setText("")
             return
-        th = theme.current()
-        parts = []
+        active = []
         for ln in self.project.lines:
             if ln.start > t:
                 break
             if ln.start <= t <= ln.end and ln.enabled:
-                ch = self.project.character(ln.character_id)
-                color = ch.color if ch else th.muted
-                name = ch.name if ch else "без роли"
-                text = ln.text.replace("<", "&lt;")
-                parts.append(f"<span style='color:{color}'>●</span> <b style='color:{color}'>{name}:</b>"
-                             f" {text}")
-        self.now_lbl.setText("<br>".join(parts[:3]) if parts else
-                             f"<span style='color:{th.muted}'>—</span>")
+                active.append(ln)
+        if not active:
+            self.cue_who.setText("сейчас без реплик")
+            self.cue_who.setStyleSheet(f"color:{theme.current().muted}")
+            self.now_lbl.setText("")
+            return
+        ln = active[-1]
+        ch = self.project.character(ln.character_id)
+        who = ch.name if ch else "без роли"
+        if len(active) > 1:
+            others = [self.project.character(x.character_id) for x in active[:-1]]
+            who += ", одновременно с " + ", ".join(o.name if o else "без роли" for o in others)
+        self.cue_who.setText(who)
+        # цвет роли — данные проекта: он связывает реплику с её дорожкой на таймлайне
+        self.cue_who.setStyleSheet(f"color:{theme.role_text(ch.color)}" if ch
+                                   else f"color:{theme.current().muted}")
+        self.now_lbl.setText(ln.text)
 
     # ================================================================ проект
     def set_project(self, p: Optional[Project]):

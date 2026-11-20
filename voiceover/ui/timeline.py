@@ -6,16 +6,17 @@ from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QScrollBar, QVBoxLayout, QWidget
 
 from ..core.models import LineSource, Project, line_status
 from . import theme
 
-RULER_H = 24
-WAVE_H = 44
+RULER_H = 26
+WAVE_H = 48
 LANE_H = 30
-LABEL_W = 130
+LABEL_W = 150
+BLOCK_RADIUS = 3   # небольшое скругление блоков реплик
 EDGE_PX = 6
 
 
@@ -128,7 +129,7 @@ class TimelineCanvas(QWidget):
     def paintEvent(self, _):
         th = theme.current()
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.Antialiasing, False)   # сетка и волна чёткими пикселями
         w, h = self.width(), self.height()
         lanes = self.lanes()
         end_t = self.t_of(w)
@@ -175,7 +176,6 @@ class TimelineCanvas(QWidget):
         if self.project:
             idx = self.lane_index()
             fm = p.fontMetrics()
-            sc = theme.status_colors()
             for ln in self.project.lines:
                 if ln.end < self.offset or ln.start > end_t:
                     continue
@@ -188,26 +188,27 @@ class TimelineCanvas(QWidget):
                 st = line_status(self.project, ln)
                 sel = ln.id in self.selected
                 hover = ln.id == self._hover
-                fill = QColor(col)
-                if th.dark:
-                    fill.setAlpha(230 if sel else (170 if hover else 120))
-                else:
-                    fill.setAlpha(245 if sel else (220 if hover else 190))
-                if not ln.enabled:
-                    fill.setAlpha(35)
+                # Квадратный блок цвета роли. Готовая реплика — сплошная заливка,
+                # реплика без актуального звука — только контур со штриховкой.
+                ready = st in ("ok", "rec")
                 path = QPainterPath()
-                path.addRoundedRect(r, 5, 5)
+                path.addRoundedRect(r, BLOCK_RADIUS, BLOCK_RADIUS)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                fill = QColor(col)
+                fill.setAlpha(255 if (sel or hover) else 215)
+                if not ln.enabled:
+                    fill.setAlpha(40)
                 p.setPen(Qt.NoPen)
-                p.fillPath(path, fill)
-                if st in ("none", "stale") and ln.enabled:
-                    hatch = QColor(th.text)
-                    hatch.setAlpha(40)
-                    p.fillPath(path, QBrush(hatch, Qt.BDiagPattern))
-                # полоса цвета роли слева
-                p.save()
-                p.setClipPath(path)
-                p.fillRect(QRectF(r.left(), r.top(), 3, r.height()), col)
-                p.restore()
+                if ready or not ln.enabled:
+                    p.fillPath(path, fill)
+                else:
+                    ghost = QColor(col)
+                    ghost.setAlpha(60 if not (sel or hover) else 95)
+                    p.fillPath(path, ghost)
+                    p.fillPath(path, QBrush(QColor(col), Qt.BDiagPattern))
+                    p.setPen(QPen(col, 1))
+                    p.setBrush(Qt.NoBrush)
+                    p.drawPath(path)
                 if sel:   # SELECT_OUTLINE: рамка акцента снаружи блока + светлая внутренняя
                     p.setRenderHint(QPainter.Antialiasing, True)
                     outer = QPainterPath()
@@ -219,33 +220,22 @@ class TimelineCanvas(QWidget):
                     inner.addRoundedRect(r.adjusted(1, 1, -1, -1), 2, 2)
                     p.setPen(QPen(QColor(th.text), 1))
                     p.drawPath(inner)
-                # статус: точка справа
-                if r.width() > 18 and ln.enabled:
-                    p.setPen(Qt.NoPen)
-                    p.setBrush(QColor(sc.get(st, th.muted)))
-                    p.drawEllipse(QPointF(r.right() - 7, r.top() + 7), 3, 3)
+                p.setRenderHint(QPainter.Antialiasing, False)
                 if r.width() > 34:
-                    txt_col = QColor("#ffffff") if (th.dark or col.lightness() < 150) \
-                        else QColor("#111111")
-                    p.setPen(txt_col)
-                    prefix = "● " if st == "rec" else ""
-                    p.drawText(r.adjusted(8, 0, -14, 0), Qt.AlignVCenter | Qt.AlignLeft,
-                               fm.elidedText(prefix + ln.text, Qt.ElideRight, int(r.width() - 22)))
+                    p.setPen(QColor(th.on_role) if (ready and ln.enabled) else QColor(th.ink))
+                    p.drawText(r.adjusted(8, 0, -6, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                               fm.elidedText(ln.text, Qt.ElideRight, int(r.width() - 14)))
 
         # линейка
-        p.fillRect(QRectF(0, 0, w, RULER_H), QColor(th.panel))
+        p.fillRect(QRectF(0, 0, w, RULER_H), QColor(th.paper))
         p.setPen(QPen(QColor(th.border), 1))
         p.drawLine(QPointF(0, RULER_H - 0.5), QPointF(w, RULER_H - 0.5))
         if self.preview_range:
             a, b = self.preview_range
             xa, xb = max(LABEL_W, self.x_of(a)), self.x_of(b)
             if xb > xa:
-                pc = QColor(th.accent)
-                pc.setAlpha(70)
-                p.fillRect(QRectF(xa, RULER_H - 5, xb - xa, 4), pc)
-        f = QFont(self.font())
-        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.5))
-        p.setFont(f)
+                p.fillRect(QRectF(xa, RULER_H - 3, xb - xa, 2), QColor(th.accent2))
+        p.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
         t = int(self.offset / step) * step
         while t <= end_t:
             x = self.x_of(t)
@@ -260,34 +250,35 @@ class TimelineCanvas(QWidget):
             t += step
 
         # левая колонка: подписи дорожек
-        p.fillRect(QRectF(0, RULER_H, LABEL_W, h - RULER_H), QColor(th.panel))
+        p.fillRect(QRectF(0, RULER_H, LABEL_W, h - RULER_H), QColor(th.paper))
         p.setPen(QPen(QColor(th.border), 1))
         p.drawLine(QPointF(LABEL_W - 0.5, 0), QPointF(LABEL_W - 0.5, h))
-        p.setFont(self.font())
+        p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
         fm = p.fontMetrics()
         p.setPen(QColor(th.muted))
-        p.drawText(QRectF(12, RULER_H, LABEL_W - 16, WAVE_H), Qt.AlignVCenter, "Оригинал")
+        p.drawText(QRectF(14, RULER_H, LABEL_W - 18, WAVE_H), Qt.AlignVCenter, "оригинал")
+        small = theme.body_font(theme.TEXT_SM - 1)
         for i, (_, name, col, is_rec) in enumerate(lanes):
             y = self.lanes_top + i * LANE_H
-            p.setPen(Qt.NoPen)
-            p.setBrush(col)
-            p.drawRoundedRect(QRectF(10, y + LANE_H / 2 - 5, 10, 10), 3, 3)
-            p.setPen(QColor(th.text))
-            label = ("🎙 " if is_rec else "") + name
-            p.drawText(QRectF(28, y, LABEL_W - 32, LANE_H), Qt.AlignVCenter,
-                       fm.elidedText(label, Qt.ElideRight, LABEL_W - 34))
+            p.fillRect(QRectF(0, y, 4, LANE_H), col)          # ключ цвета роли
+            p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
+            p.setPen(QColor(th.ink))
+            name_w = LABEL_W - 22 - (44 if is_rec else 0)
+            p.drawText(QRectF(14, y, name_w, LANE_H), Qt.AlignVCenter,
+                       p.fontMetrics().elidedText(name, Qt.ElideRight, name_w))
+            if is_rec:
+                p.setFont(small)
+                p.setPen(QColor(th.muted))
+                p.drawText(QRectF(LABEL_W - 52, y, 44, LANE_H), Qt.AlignVCenter | Qt.AlignRight,
+                           "запись")
 
         # курсор
         x = self.x_of(self.playhead)
         if x >= LABEL_W:
-            pc = QColor(th.danger)
-            p.setPen(QPen(pc, 1.5))
-            p.drawLine(QPointF(x, RULER_H - 6), QPointF(x, h))
-            p.setPen(Qt.NoPen)
-            p.setBrush(pc)
-            p.drawPolygon(QPolygonF([QPointF(x - 6, 2), QPointF(x + 6, 2),
-                                     QPointF(x + 6, RULER_H - 10), QPointF(x, RULER_H - 4),
-                                     QPointF(x - 6, RULER_H - 10)]))
+            pc = QColor(th.accent)
+            p.setRenderHint(QPainter.Antialiasing, False)
+            p.fillRect(QRectF(round(x) - 1, RULER_H - 6, 2, h), pc)
+            p.fillRect(QRectF(round(x) - 5, 3, 10, RULER_H - 9), pc)
         p.end()
 
     def _tick_step(self) -> float:

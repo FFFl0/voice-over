@@ -6,7 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QStyledItemDelegate, QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMessageBox, QPushButton,
                                QSpinBox, QVBoxLayout, QWidget)
@@ -19,18 +19,59 @@ PREVIEW_TEXT = "Привет! Так звучит мой голос в этой 
 
 
 def color_icon(color: str) -> QIcon:
+    """Квадратный ключ цвета роли (как на таймлайне)."""
     from PySide6.QtCore import Qt as _Qt
-    from PySide6.QtGui import QPainter
-    pm = QPixmap(28, 28)
+    pm = QPixmap(24, 24)
     pm.fill(_Qt.transparent)
+    from PySide6.QtGui import QPainter
     p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setPen(_Qt.NoPen)
-    p.setBrush(QColor(color))
-    p.drawEllipse(4, 4, 20, 20)
+    p.fillRect(6, 6, 12, 12, QColor(color))
     p.end()
     pm.setDevicePixelRatio(2)
     return QIcon(pm)
+
+
+def lines_word(n: int) -> str:
+    """«1 реплика», «3 реплики», «5 реплик»."""
+    if n % 10 == 1 and n % 100 != 11:
+        w = "реплика"
+    elif n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        w = "реплики"
+    else:
+        w = "реплик"
+    return f"{n} {w}"
+
+
+class CharacterRowDelegate(QStyledItemDelegate):
+    """Строка списка ролей: ключ цвета, имя, число реплик и способ озвучки — в колонках."""
+
+    def sizeHint(self, option, index):
+        from PySide6.QtCore import QSize
+        return QSize(option.rect.width(), 40)
+
+    def paint(self, p, option, index):
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QFont
+        from PySide6.QtWidgets import QStyle
+        self.initStyleOption(option, index)
+        name = option.text
+        option.text = ""
+        option.widget.style().drawControl(QStyle.CE_ItemViewItem, option, p, option.widget)
+        th = theme.current()
+        r = option.rect
+        p.save()
+        p.fillRect(QRectF(r.left(), r.top(), 4, r.height()), QColor(index.data(Qt.UserRole + 1)))
+        p.setFont(theme.body_font(theme.TEXT_MD, QFont.Medium))
+        p.setPen(QColor(th.ink))
+        p.drawText(r.adjusted(16, 0, -230, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                   p.fontMetrics().elidedText(name, Qt.ElideRight, max(20, r.width() - 250)))
+        p.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
+        p.setPen(QColor(th.muted))
+        p.drawText(QRectF(r.right() - 225, r.top(), 90, r.height()), Qt.AlignVCenter | Qt.AlignRight,
+                   index.data(Qt.UserRole + 2) or "")
+        p.drawText(QRectF(r.right() - 125, r.top(), 115, r.height()), Qt.AlignVCenter | Qt.AlignLeft,
+                   index.data(Qt.UserRole + 3) or "")
+        p.restore()
 
 
 class CharactersPanel(QWidget):
@@ -46,6 +87,7 @@ class CharactersPanel(QWidget):
 
         self.list = QListWidget()
         self.list.setMinimumHeight(150)
+        self.list.setItemDelegate(CharacterRowDelegate(self.list))
         btn_add = QPushButton(theme.icon("plus"), " Добавить")
         btn_del = QPushButton(theme.icon("trash"), " Удалить")
         btn_merge = QPushButton(theme.icon("users"), " Объединить…")
@@ -60,7 +102,7 @@ class CharactersPanel(QWidget):
         f = QFormLayout(self.box)
         self.name = QLineEdit()
         self.color_btn = QPushButton()
-        self.color_btn.setFixedSize(60, 24)
+        self.color_btn.setFixedSize(48, 24)
         self.source = QComboBox()
         self.source.addItem("Синтез речи (AI)", LineSource.TTS.value)
         self.source.addItem("Живая запись (актёр)", LineSource.RECORDING.value)
@@ -93,8 +135,7 @@ class CharactersPanel(QWidget):
         self.volume.setSingleStep(0.5)
         self.volume.setSuffix(" дБ")
         self.preview_text = QLineEdit(PREVIEW_TEXT)
-        self.btn_preview = QPushButton(theme.icon("play", "#ffffff"), " Прослушать голос")
-        self.btn_preview.setProperty("primary", True)
+        self.btn_preview = QPushButton(theme.icon("play"), " Прослушать голос")
         self.btn_lines = QPushButton(theme.icon("list"), " Показать реплики")
         self.count_lbl = QLabel()
 
@@ -163,11 +204,14 @@ class CharactersPanel(QWidget):
                 if ln.character_id:
                     counts[ln.character_id] = counts.get(ln.character_id, 0) + 1
             for c in self.project.characters:
-                kind = "живая запись" if c.source == LineSource.RECORDING else c.engine.value.capitalize()
-                if c.source == LineSource.RECORDING and c.actor:
-                    kind += f" · {c.actor}"
-                it = QListWidgetItem(color_icon(c.color),
-                                     f"{c.name}   ·  {counts.get(c.id, 0)} реплик  ·  {kind}")
+                if c.source == LineSource.RECORDING:
+                    kind = f"запись, {c.actor}" if c.actor else "живая запись"
+                else:
+                    kind = {"edge": "Edge TTS", "silero": "Silero"}.get(c.engine.value, c.engine.value)
+                it = QListWidgetItem(c.name)
+                it.setData(Qt.UserRole + 1, c.color)
+                it.setData(Qt.UserRole + 2, lines_word(counts.get(c.id, 0)))
+                it.setData(Qt.UserRole + 3, kind)
                 it.setData(Qt.UserRole, c.id)
                 self.list.addItem(it)
         self.list.blockSignals(False)
@@ -214,7 +258,7 @@ class CharactersPanel(QWidget):
             return
         self._loading = True
         self.name.setText(c.name)
-        self.color_btn.setStyleSheet(f"background:{c.color}; border-radius:6px; border:none")
+        self.color_btn.setStyleSheet(f"background:{c.color}; border:0")
         self.source.setCurrentIndex(self.source.findData(c.source.value))
         self.actor.setText(c.actor)
         self.engine.setCurrentIndex(max(0, self.engine.findData(c.engine.value)))
@@ -223,7 +267,7 @@ class CharactersPanel(QWidget):
         self.pitch.setValue(c.pitch)
         self.volume.setValue(c.volume_db)
         n = sum(1 for ln in self.project.lines if ln.character_id == c.id) if self.project else 0
-        self.count_lbl.setText(f"Реплик: {n}")
+        self.count_lbl.setText(lines_word(n))
         self._update_enabled()
         self._loading = False
 
@@ -276,7 +320,7 @@ class CharactersPanel(QWidget):
         col = QColorDialog.getColor(QColor(c.color), self, "Цвет персонажа")
         if col.isValid():
             c.color = col.name()
-            self.color_btn.setStyleSheet(f"background:{c.color}; border-radius:6px; border:none")
+            self.color_btn.setStyleSheet(f"background:{c.color}; border:0")
             self.reload(c.id)
             self.listChanged.emit()
 
