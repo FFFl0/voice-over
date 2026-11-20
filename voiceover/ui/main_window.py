@@ -877,7 +877,7 @@ class MainWindow(QMainWindow):
             return
         self.flush_history()
         used: set[str] = set()
-        states = [p.snapshot()] + [s.state for s in self.history._undo + self.history._redo]
+        states = [p.snapshot()] + list(self.history.states())
         for st in states:
             for ln in st["lines"]:
                 for key in ("tts_path", "rec_path"):

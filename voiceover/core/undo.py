@@ -3,20 +3,38 @@
 Снимок — это реплики, персонажи и параметры сведения. Изменения фиксируются
 одной точкой (commit) после любого действия; несколько быстрых правок подряд
 (например, набор текста) склеиваются в один шаг на стороне интерфейса.
+
+Снимки хранятся сжатым JSON (zlib): на фильм в 3000 реплик шаг весит ~60 КБ
+вместо ~1.4 МБ в виде словарей Python, поэтому 200 шагов — около 12 МБ.
 """
 
 from __future__ import annotations
 
+import json
+import zlib
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterator, Optional
 
 from .models import Project
 
 
+def pack(state: dict) -> bytes:
+    raw = json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return zlib.compress(raw, 1)
+
+
+def unpack(blob: bytes) -> dict:
+    return json.loads(zlib.decompress(blob).decode("utf-8"))
+
+
 @dataclass
 class _Step:
-    state: dict
+    blob: bytes
     label: str
+
+    @property
+    def state(self) -> dict:
+        return unpack(self.blob)
 
 
 class UndoHistory:
@@ -24,16 +42,16 @@ class UndoHistory:
         self.limit = limit
         self._undo: list[_Step] = []
         self._redo: list[_Step] = []
-        self._current: Optional[dict] = None
+        self._current: Optional[bytes] = None
 
     def reset(self, project: Optional[Project]) -> None:
         self._undo.clear()
         self._redo.clear()
-        self._current = project.snapshot() if project else None
+        self._current = pack(project.snapshot()) if project else None
 
     def commit(self, project: Project, label: str = "Изменение") -> bool:
         """Зафиксировать текущее состояние. True — если оно действительно изменилось."""
-        new = project.snapshot()
+        new = pack(project.snapshot())
         if self._current is None:
             self._current = new
             return False
@@ -63,8 +81,8 @@ class UndoHistory:
             return None
         step = self._undo.pop()
         self._redo.append(_Step(self._current, step.label))
-        project.restore(step.state)
-        self._current = step.state
+        project.restore(unpack(step.blob))
+        self._current = step.blob
         return step.label
 
     def redo(self, project: Project) -> Optional[str]:
@@ -72,6 +90,14 @@ class UndoHistory:
             return None
         step = self._redo.pop()
         self._undo.append(_Step(self._current, step.label))
-        project.restore(step.state)
-        self._current = step.state
+        project.restore(unpack(step.blob))
+        self._current = step.blob
         return step.label
+
+    def states(self) -> Iterator[dict]:
+        """Все состояния в истории (для поиска файлов, на которые ещё можно вернуться)."""
+        for step in self._undo + self._redo:
+            yield step.state
+
+    def memory_bytes(self) -> int:
+        return sum(len(s.blob) for s in self._undo + self._redo) + len(self._current or b"")

@@ -42,3 +42,23 @@ def test_limit():
     while h.undo(p):
         n += 1
     assert n == 3 and len(p.lines) == 7
+
+
+def test_history_is_compact_and_exact():
+    p = Project()
+    c = p.add_character("A")
+    p.lines = [Line(i * 2, i * 2 + 1.5, f"Реплика номер {i} обычной длины для фильма", c.id)
+               for i in range(3000)]
+    h = UndoHistory()
+    h.reset(p)
+    for k in range(20):
+        p.lines[k].text += "!"
+        h.commit(p, f"шаг {k}")
+    assert h.memory_bytes() < 21 * 120_000          # ~60 КБ на шаг, а не мегабайты
+    for _ in range(20):
+        h.undo(p)
+    assert all(not ln.text.endswith("!") for ln in p.lines[:20])
+    for _ in range(20):
+        h.redo(p)
+    assert all(ln.text.endswith("!") for ln in p.lines[:20])
+    assert len(list(h.states())) == 20
