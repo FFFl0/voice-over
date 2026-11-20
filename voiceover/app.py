@@ -80,6 +80,12 @@ def install_excepthook() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = sys.argv if argv is None else argv
+    if len(args) > 2 and args[1] == "--separate-worker":   # дочерний процесс Demucs (.exe)
+        import os
+        os.environ.setdefault("TQDM_DISABLE", "1")
+        from .core.separation import worker_main
+        return worker_main(list(args[2:]))
     ensure_std_streams()
     install_excepthook()
     argv = list(sys.argv if argv is None else argv)
