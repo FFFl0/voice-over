@@ -21,15 +21,21 @@ echo Используется:
 %PY% --version
 echo.
 
-rem --- Окружение, созданное неподходящей версией Python, пересоздаём
-if not exist .venv\Scripts\python.exe goto :makevenv
-.venv\Scripts\python.exe -c "import sys; sys.exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" >nul 2>nul
-if not errorlevel 1 goto :venvready
+rem --- Окружение пересоздаём, если оно собрано другим Python (или старым setup.bat).
+rem --- Проверяем по своей отметке: код выхода сломанного .venv\Scripts\python.exe
+rem --- бывает нулевым, даже когда его базовый Python удалён.
+set "VENVPY="
+if exist .venv\vo-python.txt set /p VENVPY=<.venv\vo-python.txt
+if /i "%VENVPY%"=="%PY%" goto :venvcheck
+if not exist .venv goto :makevenv
 echo Папка .venv создана другой версией Python, пересоздаю её...
 rmdir /s /q .venv
+if exist .venv goto :venvlocked
 :makevenv
 %PY% -m venv .venv || goto :err
-:venvready
+>.venv\vo-python.txt echo %PY%
+:venvcheck
+.venv\Scripts\python.exe -c "import sys, pip; print('.venv: Python', sys.version.split()[0])" || goto :venvbroken
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt || goto :err
@@ -73,6 +79,19 @@ echo.
 echo Установите Python 3.12 с https://www.python.org/downloads/
 echo в установщике отметьте "Add python.exe to PATH".
 echo Более новую версию удалять не нужно: setup.bat сам выберет 3.12.
+pause
+exit /b 1
+
+:venvbroken
+echo.
+echo Окружение .venv повреждено. Удалите папку .venv и запустите setup.bat ещё раз.
+pause
+exit /b 1
+
+:venvlocked
+echo.
+echo Не удалось удалить папку .venv: закройте программу и окна, которые её используют,
+echo удалите папку .venv вручную и запустите setup.bat ещё раз.
 pause
 exit /b 1
 
