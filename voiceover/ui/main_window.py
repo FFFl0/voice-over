@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication
                                QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
                                QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
-                               QSplitter, QStackedWidget, QTableView, QTabWidget, QTextEdit,
+                               QSplitter, QStackedWidget, QTabWidget, QTextEdit,
                                QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
