@@ -34,6 +34,7 @@ class LineSource(str, Enum):
 class Engine(str, Enum):
     EDGE = "edge"
     SILERO = "silero"
+    PIPER = "piper"
 
 
 def new_id() -> str:

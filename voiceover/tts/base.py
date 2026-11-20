@@ -65,8 +65,9 @@ _ENGINES: dict[str, TTSEngine] = {}
 def _registry() -> dict[str, TTSEngine]:
     if not _ENGINES:
         from .edge import EdgeEngine
+        from .piper import PiperEngine
         from .silero import SileroEngine
-        for e in (EdgeEngine(), SileroEngine()):
+        for e in (EdgeEngine(), PiperEngine(), SileroEngine()):
             _ENGINES[e.id] = e
     return _ENGINES
 

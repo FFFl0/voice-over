@@ -26,6 +26,16 @@ RU_VOICES = [
 ]
 
 
+NO_AUDIO_HELP = (
+    "Edge TTS не вернул звук. Это не ошибка в настройках персонажа — сервис Microsoft не ответил.\n\n"
+    "Что можно сделать:\n"
+    "1. Обновить библиотеку: запустите setup.bat (или pip install -U edge-tts) — Microsoft "
+    "периодически меняет протокол, и старые версии перестают работать.\n"
+    "2. Если не помогло — сервис может быть недоступен из вашей сети: попробуйте VPN.\n"
+    "3. Переключите персонажей на офлайн-движок Piper: «Персонажи» → «Раздать голоса» → Piper "
+    "(или «Движок» в настройках персонажа). Интернет нужен только для первой загрузки голоса.")
+
+
 def _signed(v: int, unit: str) -> str:
     return f"{'+' if v >= 0 else ''}{int(v)}{unit}"
 
@@ -61,6 +71,8 @@ class EdgeEngine(TTSEngine):
             except Exception as e:  # noqa: BLE001
                 last = e
                 await asyncio.sleep(1.5 * (attempt + 1))
+        if type(last).__name__ == "NoAudioReceived":
+            raise TTSError(NO_AUDIO_HELP)
         raise TTSError(f"Edge TTS: {last}")
 
     def synthesize(self, text: str, voice: str, out_path: str,

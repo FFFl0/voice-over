@@ -13,6 +13,12 @@ try:  # Whisper необязателен: без него сборка прох�
     hidden += collect_submodules("faster_whisper")
 except ImportError:
     pass
+try:  # Piper: словари espeak-ng внутри пакета
+    import piper  # noqa: F401
+    datas += collect_data_files("piper")
+    hidden += collect_submodules("piper")
+except ImportError:
+    pass
 try:  # OCR (RapidOCR): модели лежат внутри пакета
     import rapidocr_onnxruntime  # noqa: F401
     datas += collect_data_files("rapidocr_onnxruntime")

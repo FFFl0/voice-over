@@ -377,13 +377,24 @@ class CharactersPanel(QWidget):
     def auto_voices(self):
         if not self.project:
             return
-        if QMessageBox.question(self, "Раздать голоса",
-                                "Назначить всем AI-персонажам разные голоса автоматически?\n"
-                                "Текущие настройки голосов будут заменены.") != QMessageBox.Yes:
+        engines = [e for e in list_engines()]
+        titles = [e.title + ("" if e.available()[0] else " — не установлен") for e in engines]
+        cur = preferred_engine(self.project)
+        start = next((i for i, e in enumerate(engines) if e.id == cur), 0)
+        title, ok = QInputDialog.getItem(
+            self, "Раздать голоса",
+            "Назначить всем AI-персонажам разные голоса движка\n"
+            "(текущие настройки голосов будут заменены):", titles, start, False)
+        if not ok:
+            return
+        engine = engines[titles.index(title)]
+        avail, why = engine.available()
+        if not avail:
+            QMessageBox.warning(self, "Раздать голоса", why)
             return
         for i, c in enumerate(self.project.characters):
             if c.source == LineSource.TTS:
-                auto_assign_voice(self.project, c, i)
+                auto_assign_voice(self.project, c, i, engine.id)
         self.reload()
         self.changed.emit()
         self.listChanged.emit()
@@ -392,13 +403,28 @@ class CharactersPanel(QWidget):
 FEMALE_HINTS = ("а", "я")  # окончания русских женских имён — очень грубая эвристика
 
 
-def auto_assign_voice(project: Project, c: Character, index: Optional[int] = None) -> None:
+def preferred_engine(project: Project, exclude: Optional[Character] = None) -> str:
+    """Движок для нового персонажа: тот, которым озвучено большинство AI-персонажей проекта
+    (если пользователь перевёл всех на Piper, новые роли тоже получат Piper)."""
+    counts: dict[str, int] = {}
+    for x in project.characters:
+        if x is not exclude and x.source == LineSource.TTS:
+            counts[x.engine.value] = counts.get(x.engine.value, 0) + 1
+    if counts:
+        return max(counts, key=counts.get)
+    for eid in ("edge", "piper", "silero"):
+        if get_engine(eid).available()[0]:
+            return eid
+    return "edge"
+
+
+def auto_assign_voice(project: Project, c: Character, index: Optional[int] = None,
+                      engine: Optional[str] = None) -> None:
     """Подобрать голос так, чтобы персонажи звучали по-разному: перебираем голоса
     и добавляем вариации высоты/темпа, когда голоса заканчиваются."""
     if index is None:
         index = project.characters.index(c)
-    ok, _ = get_engine("edge").available()
-    engine = "edge" if ok else "silero"
+    engine = engine or preferred_engine(project, exclude=c)
     voices = get_engine(engine).voices()
     name = c.name.strip().lower()
     want_f = name.endswith(FEMALE_HINTS)

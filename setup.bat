@@ -39,19 +39,25 @@ if exist .venv goto :venvlocked
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt || goto :err
+rem Edge TTS всегда до последней версии: Microsoft периодически меняет протокол
+pip install -U edge-tts
 echo.
 echo Основные модули установлены: Edge TTS, запись, сведение, экспорт.
 echo.
 
-echo Устанавливаю локальные модули: Whisper, перевод без интернета, OCR субтитров...
-pip install -r requirements-whisper.txt
-if errorlevel 1 goto :nowhisper
+echo Устанавливаю локальные модули: Whisper, офлайн-голоса Piper, перевод без интернета, OCR...
+rem Ставим по одному пакету: если какой-то не соберётся для вашего Python, остальные всё равно установятся
+set "LOCALFAIL="
+for /f "usebackq eol=# tokens=*" %%P in ("requirements-whisper.txt") do (
+  pip install "%%P" || set "LOCALFAIL=%%P"
+)
+if defined LOCALFAIL goto :nowhisper
 echo Локальные модули установлены.
 goto :ai
 :nowhisper
 echo.
-echo Локальные модули установить не удалось. Без них не будет распознавания речи, локального перевода и OCR,
-echo всё остальное доступно. Сообщения pip выше подскажут причину.
+echo Часть локальных модулей установить не удалось - см. сообщения pip выше.
+echo Остальное установлено и работает.
 :ai
 echo.
 choice /C YN /M "Установить AI-модули: голоса Silero, удаление голосов Demucs, OCR для русского и японского (2-4 ГБ)"
