@@ -249,3 +249,77 @@ def write_srt(path: str | Path, items: list[tuple[float, float, str, str]],
         t = f"{spk}: {text}" if with_speaker and spk else text
         chunks.append(f"{i}\n{fmt_ts(s)} --> {fmt_ts(e)}\n{t}\n")
     Path(path).write_text("\n".join(chunks), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- экспорт для релиза
+
+def _ass_escape(text: str) -> str:
+    """Фигурные скобки в ASS — теги; переводы строк — \\N."""
+    return (text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
+            .replace("\r", "").replace("\n", "\\N"))
+
+
+def _ass_color(hex_rgb: str) -> str:
+    """#RRGGBB → &H00BBGGRR (порядок ASS)."""
+    h = hex_rgb.lstrip("#")
+    if len(h) != 6:
+        return "&H00FFFFFF"
+    return f"&H00{h[4:6]}{h[2:4]}{h[0:2]}".upper()
+
+
+def write_ass(path: str | Path, items: list[tuple], title: str = "",
+              color_by_speaker: bool = False, play_res: tuple[int, int] = (1920, 1080)) -> None:
+    """items: (start, end, text, speaker, color). Персонаж пишется в поле Name;
+    при color_by_speaker текст реплики окрашивается цветом персонажа."""
+    w, h = play_res
+    head = f"""[Script Info]
+; VoiceOver Studio
+Title: {title or "Субтитры"}
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: {w}
+PlayResY: {h}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,{int(h * 0.055)},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,{max(2, h // 400)},1,2,{w // 20},{w // 20},{int(h * 0.05)},204
+Style: Original,Arial,{int(h * 0.04)},&H00D0D0D0,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,{max(2, h // 500)},1,8,{w // 20},{w // 20},{int(h * 0.04)},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    rows = []
+    for it in items:
+        s, e, text, spk = it[:4]
+        color = it[4] if len(it) > 4 else ""
+        style = it[5] if len(it) > 5 else "Default"
+        body = _ass_escape(text)
+        if color_by_speaker and color and style == "Default":
+            body = "{\\c" + _ass_color(color).replace("&H00", "&H") + "&}" + body
+        name = _ass_escape(spk).replace(",", " ")
+        rows.append(f"Dialogue: 0,{fmt_ts(s, '.', 2)},{fmt_ts(e, '.', 2)},{style},{name},0,0,0,,{body}")
+    Path(path).write_text(head + "\n".join(rows) + "\n", encoding="utf-8-sig")
+
+
+def build_subtitle_items(lines, character_of, text_mode: str = "text",
+                         with_speaker: bool = True, only_enabled: bool = True) -> list[tuple]:
+    """Реплики проекта → строки субтитров.
+    text_mode: «text» — текст озвучки (перевод), «orig» — оригинал, «both» — перевод и оригинал."""
+    out = []
+    for ln in sorted(lines, key=lambda x: x.start):
+        if only_enabled and not ln.enabled:
+            continue
+        ch = character_of(ln.character_id)
+        spk = ch.name if (ch and with_speaker) else ""
+        color = ch.color if ch else ""
+        orig = ln.orig_text or ln.text
+        if text_mode == "orig":
+            text = orig
+        elif text_mode == "both" and ln.orig_text and ln.orig_text != ln.text:
+            text = f"{ln.text}\n{ln.orig_text}"
+        else:
+            text = ln.text
+        if text.strip():
+            out.append((ln.start, ln.end, text.strip(), spk, color))
+    return out

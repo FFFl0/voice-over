@@ -806,3 +806,65 @@ class OcrDialog(QDialog):
         if r == "2min":
             return self.cursor, min(self.duration, self.cursor + 120) if self.duration else self.cursor + 120
         return 0.0, None
+
+
+# ======================================================================== экспорт субтитров
+
+class SubtitleExportDialog(QDialog):
+    """Субтитры для релиза: SRT/ASS, перевод/оригинал/оба, имена и цвета персонажей."""
+
+    def __init__(self, default_path: str, has_orig: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Экспорт субтитров")
+        self.setMinimumWidth(560)
+        self.fmt = QComboBox()
+        self.fmt.addItem("ASS — с именами и цветами персонажей", "ass")
+        self.fmt.addItem("SRT — простой формат", "srt")
+        self.text = QComboBox()
+        self.text.addItem("Текст озвучки (перевод)", "text")
+        self.text.addItem("Перевод и оригинал (двуязычные)", "both")
+        self.text.addItem("Оригинал", "orig")
+        self.text.setEnabled(has_orig)
+        self.speaker = QCheckBox("Указывать персонажа")
+        self.speaker.setToolTip("ASS — в поле Name (видно в редакторах субтитров); SRT — «Имя: текст»")
+        self.color = QCheckBox("Окрашивать реплики цветом персонажа (ASS)")
+        self.only_enabled = QCheckBox("Только включённые реплики")
+        self.only_enabled.setChecked(True)
+        self.out = QLineEdit(default_path)
+        self.btn = QPushButton("Обзор…")
+        self.btn.clicked.connect(self._pick)
+        row = QHBoxLayout()
+        row.addWidget(self.out, 1)
+        row.addWidget(self.btn)
+        f = QFormLayout()
+        f.addRow("Формат:", self.fmt)
+        f.addRow("Текст:", self.text)
+        f.addRow(self.speaker)
+        f.addRow(self.color)
+        f.addRow(self.only_enabled)
+        f.addRow("Файл:", row)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Сохранить")
+        bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(f)
+        lay.addWidget(bb)
+        self.fmt.currentIndexChanged.connect(self._update)
+        self._update()
+
+    def _update(self, *_):
+        ass = self.fmt.currentData() == "ass"
+        self.color.setEnabled(ass)
+        self.speaker.setChecked(ass)
+        p = Path(self.out.text())
+        if p.name:
+            self.out.setText(str(p.with_suffix("." + self.fmt.currentData())))
+
+    def _pick(self):
+        p, _ = QFileDialog.getSaveFileName(self, "Куда сохранить субтитры", self.out.text(),
+                                           "Субтитры (*.ass *.srt)")
+        if p:
+            self.out.setText(p)
+            self._update()

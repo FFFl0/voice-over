@@ -98,3 +98,30 @@ def test_export_asks_before_overwrite(win, tmp_path, monkeypatch):
     win.export()
     assert any("уже существует" in q for q in asked) and not started
     assert existing.read_bytes() == b"old"
+
+
+def test_subtitle_export_dialog_flow(win, tmp_path, monkeypatch):
+    from voiceover.core.models import Line, Project
+    from voiceover.core.subtitles import load_subtitles
+    from voiceover.ui import dialogs
+    (tmp_path / "ep01.mkv").write_bytes(b"x")       # видео есть — иначе модальный «Видео не найдено»
+    p = Project(path=str(tmp_path / "ep01.vop"), video_path=str(tmp_path / "ep01.mkv"), duration=10)
+    a = p.add_character("Тенма")
+    p.lines = [Line(1, 2, "Привет", a.id, orig_text="Xin chào"), Line(3, 4, "Пока", a.id)]
+    win.set_project(p)
+
+    def run(fmt, text):
+        def ex(self):
+            self.fmt.setCurrentIndex(self.fmt.findData(fmt))
+            self.text.setCurrentIndex(self.text.findData(text))
+            return QDialog.Accepted
+        monkeypatch.setattr(dialogs.SubtitleExportDialog, "exec", ex)
+        win.export_script()
+
+    run("ass", "both")
+    out = tmp_path / "ep01.ru.ass"
+    subs = load_subtitles(out)
+    assert subs[0].text == "Привет Xin chào" and subs[0].speaker == "Тенма"
+    run("srt", "orig")
+    subs = load_subtitles(tmp_path / "ep01.ru.srt", detect_speakers=False)
+    assert [s.text for s in subs] == ["Xin chào", "Пока"]

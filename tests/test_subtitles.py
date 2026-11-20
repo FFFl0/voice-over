@@ -84,3 +84,26 @@ def test_vtt():
     lines = parse_vtt(VTT)
     assert lines[0].speaker == "Anna" and lines[0].text == "Hello there"
     assert lines[1].start == 3.0
+
+
+def test_export_items_and_ass(tmp_path):
+    from voiceover.core.models import Line, Project
+    from voiceover.core.subtitles import build_subtitle_items, load_subtitles, write_ass, write_srt
+    p = Project()
+    a = p.add_character("Тенма", color="#ec9695")
+    p.lines = [Line(1, 2, "Привет, {друг}!", a.id, orig_text="Xin chào"),
+               Line(3, 4.5, "Без роли", None),
+               Line(5, 6, "выкл.", a.id, enabled=False)]
+    items = build_subtitle_items(p.lines, p.character, "both")
+    assert items[0][2] == "Привет, {друг}!\nXin chào" and items[0][3] == "Тенма"
+    assert len(items) == 2                                    # выключенная пропущена
+    assert build_subtitle_items(p.lines, p.character, "orig")[0][2] == "Xin chào"
+    ass = tmp_path / "out.ass"
+    write_ass(ass, items, "Серия 1", color_by_speaker=True)
+    txt = ass.read_text(encoding="utf-8-sig")
+    assert "Dialogue: 0,0:00:01.00,0:00:02.00,Default,Тенма,0,0,0,,{\\c&H9596EC&}Привет, (друг)!\\NXin chào" in txt
+    back = load_subtitles(ass)                               # читается обратно нашим же импортом
+    assert back[0].speaker == "Тенма" and back[0].text.startswith("Привет, (друг)!")
+    srt = tmp_path / "out.srt"
+    write_srt(srt, [i[:4] for i in items], with_speaker=False)
+    assert load_subtitles(srt, detect_speakers=False)[1].text == "Без роли"

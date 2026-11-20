@@ -327,7 +327,8 @@ class MainWindow(QMainWindow):
         self.a_translate = act("Перевести", lambda: text_tools.translate_lines(self), "Ctrl+Shift+T",
                                "translate", "Перевести реплики на язык озвучки")
         self.a_restore = act("Вернуть оригинал выделенных", lambda: text_tools.restore_original(self))
-        self.a_export_srt = act("Экспорт сценария (SRT с ролями)…", self.export_script)
+        self.a_export_srt = act("Экспорт субтитров (SRT/ASS)…", self.export_script, "Ctrl+Shift+E",
+                                tip="Сохранить перевод и/или оригинал как субтитры для релиза")
         self.a_export = act("Экспорт", self.export, "Ctrl+E", "export",
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
@@ -995,19 +996,39 @@ class MainWindow(QMainWindow):
         self.run_task(Task("Распознавание речи", work), done)
 
     def export_script(self):
-        if not self.project:
+        """Субтитры для релиза (перевод/оригинал, SRT или ASS)."""
+        from ..core.subtitles import build_subtitle_items, write_ass
+        from .dialogs import SubtitleExportDialog
+        p = self.project
+        if not p:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Экспорт сценария",
-                                              str(Path(self.project.path).with_suffix(".roles.srt")),
-                                              "SRT (*.srt)")
-        if not path:
+        base = Path(p.video_path or p.path)
+        lang = self.settings.translate_target or "ru"
+        dlg = SubtitleExportDialog(str(base.with_name(f"{base.stem}.{lang}.ass")),
+                                   any(ln.orig_text for ln in p.lines), self)
+        if dlg.exec() != QDialog.Accepted:
             return
-        items = []
-        for ln in self.project.lines:
-            ch = self.project.character(ln.character_id)
-            items.append((ln.start, ln.end, ln.text, ch.name if ch else ""))
-        write_srt(path, items)
-        self.statusBar().showMessage(f"Сценарий сохранён: {path}", 5000)
+        out = dlg.out.text().strip()
+        if not out:
+            return
+        if p.video_path and Path(out).resolve() == Path(p.video_path).resolve():
+            QMessageBox.warning(self, "Экспорт субтитров", "Нельзя перезаписать видео.")
+            return
+        if Path(out).exists() and QMessageBox.question(
+                self, "Экспорт субтитров", f"Файл уже существует:\n{out}\n\nЗаменить его?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        items = build_subtitle_items(p.lines, p.character, dlg.text.currentData(),
+                                     dlg.speaker.isChecked(), dlg.only_enabled.isChecked())
+        try:
+            if dlg.fmt.currentData() == "ass":
+                write_ass(out, items, base.stem, dlg.color.isChecked())
+            else:
+                write_srt(out, [i[:4] for i in items], with_speaker=dlg.speaker.isChecked())
+        except OSError as e:
+            QMessageBox.critical(self, "Экспорт субтитров", f"Не удалось сохранить файл:\n{e}")
+            return
+        self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
     def selected_lines(self) -> list[Line]:
