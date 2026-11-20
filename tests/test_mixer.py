@@ -155,3 +155,62 @@ def test_old_mix_settings_default_only_lines():
     from voiceover.core.models import MixSettings
     m = MixSettings.from_dict({"mode": "dubbing"})
     assert m.dub_only_lines and MixSettings.from_dict(m.to_dict()).dub_only_lines
+
+
+def _with_stems(tmp_path):
+    """Проект после «Отделить голоса»: фон — тон 100 Гц, голоса оригинала — 300 Гц."""
+    p = make_project(tmp_path)
+    d = p.project_dir
+    sf.write(d / "background.wav", np.stack([tone(6, 100, 0.2)] * 2, 1), SR)
+    sf.write(d / "vocals.wav", np.stack([tone(6, 300, 0.2)] * 2, 1), SR)
+    p.background_wav = "background.wav"
+    return p
+
+
+def _level(y, a, b, f):
+    seg = y[int(a * SR): int(b * SR), 0]
+    spec = np.abs(np.fft.rfft(seg)) * 2 / len(seg)
+    return float(spec[np.argmin(np.abs(np.fft.rfftfreq(len(seg), 1 / SR) - f))])
+
+
+def test_stems_mute(tmp_path):
+    p = _with_stems(tmp_path)
+    assert mixer.wave_keys(p) == ["vocals", "background"]
+    out = tmp_path / "o.wav"
+    # закадровый: вне реплик слышны и фон, и голоса оригинала
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 4, 5.5, 100) > 0.15 and _level(y, 4, 5.5, 300) > 0.15
+    p.mix.muted = ["vocals"]
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 4, 5.5, 100) > 0.15 and _level(y, 4, 5.5, 300) < 1e-3
+    p.mix.muted = ["background"]
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 4, 5.5, 100) < 1e-3 and _level(y, 4, 5.5, 300) > 0.15
+
+
+def test_stems_dubbing(tmp_path):
+    p = _with_stems(tmp_path)
+    p.mix.mode = MixMode.DUBBING
+    out = tmp_path / "o.wav"
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 1.3, 2.8, 300) < 1e-3          # под репликами голоса оригинала убраны
+    assert _level(y, 1.3, 2.8, 100) > 0.15           # фон остаётся
+    assert _level(y, 4, 5.5, 300) > 0.15             # вне реплик — оригинал целиком
+    p.mix.muted = ["vocals"]
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 4, 5.5, 300) < 1e-3
+
+
+def test_original_mute_without_stems(tmp_path):
+    p = make_project(tmp_path)
+    assert mixer.wave_keys(p) == ["original"]
+    p.mix.muted = ["original"]
+    out = tmp_path / "o.wav"
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    assert _level(y, 4, 5.5, 100) < 1e-3

@@ -34,6 +34,10 @@ class VideoPlayer(QWidget):
         self._dub_offset = 0.0     # с какой секунды фильма начинается файл превью
         self._dub_len = 0.0
         self._stop_at: float | None = None
+        # Дорожки после отделения голосов (голоса, фон) — играют вместо звука видео
+        # в режиме «оригинал», чтобы любую можно было заглушить
+        self.stems: dict[str, tuple[QMediaPlayer, QAudioOutput]] = {}
+        self.muted_tracks: set[str] = set()
 
         self.btn_play = QToolButton()
         self.btn_play.setToolTip("Воспроизведение / пауза (Пробел)")
@@ -112,6 +116,32 @@ class VideoPlayer(QWidget):
         self.player.stop()
         self.player.setSource(QUrl())
         self.dub.setSource(QUrl())
+        self.set_stems({})
+
+    def set_stems(self, paths: dict[str, str]) -> None:
+        """paths: ключ дорожки → wav. Пустой словарь — играет звук самого видео."""
+        for pl, _out in self.stems.values():
+            pl.stop()
+            pl.setSource(QUrl())
+            pl.deleteLater()
+        self.stems = {}
+        for key, path in paths.items():
+            pl = QMediaPlayer(self)
+            out = QAudioOutput(self)
+            pl.setAudioOutput(out)
+            pl.setSource(QUrl.fromLocalFile(path))
+            self.stems[key] = (pl, out)
+        self._apply_sound()
+
+    def set_muted_tracks(self, keys: set[str]) -> None:
+        self.muted_tracks = set(keys)
+        self._apply_sound()
+
+    def release_stems(self) -> None:
+        """Освободить файлы дорожек (перед повторным отделением голосов)."""
+        for pl, _out in self.stems.values():
+            pl.stop()
+            pl.setSource(QUrl())
 
     def set_preview(self, wav: str, offset: float, length: float) -> None:
         self.dub.stop()
@@ -155,13 +185,18 @@ class VideoPlayer(QWidget):
     def set_muted(self, muted: bool) -> None:
         self.audio.setMuted(muted)
         self.dub_audio.setMuted(muted)
+        for _pl, out in self.stems.values():
+            out.setMuted(muted)
 
     # ------------------------------------------------------------ внутреннее
     def _apply_sound(self, *_):
         v = self.vol.value() / 100
         mode = self.sound.currentIndex()
-        self.audio.setVolume(v if mode == 0 else 0.0)
+        orig_on = mode == 0 and not self.stems and "original" not in self.muted_tracks
+        self.audio.setVolume(v if orig_on else 0.0)
         self.dub_audio.setVolume(v if mode == 1 else 0.0)
+        for key, (_pl, out) in self.stems.items():
+            out.setVolume(v if mode == 0 and key not in self.muted_tracks else 0.0)
         self._sync_dub(force=True)
 
     def _on_pos(self, ms: int):
@@ -190,7 +225,8 @@ class VideoPlayer(QWidget):
         self.playingChanged.emit(playing)
 
     def _sync_dub(self, force: bool = False):
-        """Держим плеер превью синхронно с видео."""
+        """Держим плеер превью (и дорожки голосов/фона) синхронно с видео."""
+        self._sync_stems(force)
         if self.dub.source().isEmpty() or self.sound.currentIndex() != 1:
             if self.dub.playbackState() == QMediaPlayer.PlayingState:
                 self.dub.pause()
@@ -206,3 +242,18 @@ class VideoPlayer(QWidget):
         if force or drift > 0.08 or self.dub.playbackState() != QMediaPlayer.PlayingState:
             self.dub.setPosition(int(rel * 1000))
             self.dub.play()
+
+    def _sync_stems(self, force: bool = False) -> None:
+        on = self.sound.currentIndex() == 0 and self.is_playing()
+        pos = self.position()
+        for key, (pl, _out) in self.stems.items():
+            if not on or key in self.muted_tracks:
+                if pl.playbackState() == QMediaPlayer.PlayingState:
+                    pl.pause()
+                if not on and not self.is_playing():
+                    pl.setPosition(int(pos * 1000))
+                continue
+            drift = abs(pl.position() / 1000 - pos)
+            if force or drift > 0.08 or pl.playbackState() != QMediaPlayer.PlayingState:
+                pl.setPosition(int(pos * 1000))
+                pl.play()

@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
         self.chars = CharactersPanel()
         self.record = RecordPanel(self.player, self.settings)
         self.mix_panel = MixPanel()
-        self.mix_panel.on_change = lambda: self.mark_dirty("Настройки сведения")
+        self.mix_panel.on_change = self._on_mix_changed
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(False)
@@ -279,6 +279,7 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.seekRequested.connect(self.player.seek)
         self.timeline.canvas.lineSelected.connect(self._select_line_from_timeline)
         self.timeline.canvas.lineActivated.connect(self._play_line_video)
+        self.timeline.canvas.muteToggled.connect(self.toggle_track_mute)
         self.timeline.canvas.lineEdited.connect(lambda i: self._on_line_edited(i, "Изменение тайминга"))
         self.table.selectionModel().selectionChanged.connect(self._on_table_selection)
         self.lines_model.edited.connect(lambda i: self._on_line_edited(i, "Правка реплики"))
@@ -562,6 +563,7 @@ class MainWindow(QMainWindow):
             self.refresh_all()
             bg = self.project.resolve(self.project.background_wav)
             self.mix_panel.set_mix(self.project.mix, bool(bg and bg.exists()))
+            self._apply_track_mutes()
             if cur_id and self.lines_model.row_of(cur_id) >= 0:
                 self.select_line(cur_id, seek=False)
             else:
@@ -681,23 +683,65 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _load_waveform(self):
-        """Фоновый расчёт волны оригинала для таймлайна (не блокирует интерфейс)."""
+        """Дорожки звука на таймлайне и в плеере: оригинал, а после отделения голосов —
+        отдельно голоса и фон. Волны считаются в фоне (не блокируют интерфейс)."""
         p = self.project
         if not p:
             return
-        wav = p.resolve(p.original_wav)
-        if not wav or not wav.exists():
-            return
+        keys = mixer.wave_keys(p)
+        stems = mixer.stem_paths(p)
+        files = ({"background": stems[0], "vocals": stems[1]} if stems
+                 else {"original": p.resolve(p.original_wav)})
+        self.timeline.canvas.set_waves(keys)
+        self.timeline.refresh()
+        self.player.set_stems({k: str(v) for k, v in files.items()} if stems else {})
+        self.mix_panel.set_tracks(keys)
+        self._apply_track_mutes()
         cache = p.project_dir / "cache"
+        self._wave_tasks = []
+        for key in keys:
+            wav = files.get(key)
+            if not wav or not wav.exists():
+                continue
 
-        def work(t: Task):
-            return compute_peaks(str(wav), PEAKS_PER_SEC, cache, t.is_cancelled)
+            def work(t: Task, wav=wav):
+                return compute_peaks(str(wav), PEAKS_PER_SEC, cache, t.is_cancelled)
 
-        task = Task("Волна", work)
-        task.signals.result.connect(
-            lambda pk: self.project is p and self.timeline.canvas.set_peaks(pk, PEAKS_PER_SEC))
-        self._wave_task = task
-        pool().start(task)
+            task = Task("Волна", work)
+            task.signals.result.connect(
+                lambda pk, key=key: self.project is p
+                and self.timeline.canvas.set_wave(key, pk, PEAKS_PER_SEC))
+            self._wave_tasks.append(task)
+            pool().start(task)
+
+    # ------------------------------------------------------------ заглушение дорожек
+    def _apply_track_mutes(self):
+        p = self.project
+        muted = set(p.mix.muted) if p else set()
+        self.timeline.canvas.set_muted(muted)
+        self.player.set_muted_tracks(muted)
+        self.mix_panel.set_muted(muted)
+
+    def toggle_track_mute(self, key: str):
+        p = self.project
+        if not p:
+            return
+        muted = set(p.mix.muted)
+        muted ^= {key}
+        p.mix.muted = sorted(muted)
+        self._apply_track_mutes()
+        self.mark_dirty("Заглушение дорожки")
+        self._mutes_changed()
+
+    def _on_mix_changed(self):
+        self._apply_track_mutes()
+        self.mark_dirty("Настройки сведения")
+
+    def _mutes_changed(self):
+        if self.timeline.canvas.preview_range:
+            self.statusBar().showMessage(
+                "Заглушение слышно сразу в режиме «Звук: оригинал». Чтобы оно попало в "
+                "превью озвучки, соберите его заново (F6).", 8000)
 
     def maybe_save(self) -> bool:
         if not self.project or not self.dirty:
@@ -1313,6 +1357,8 @@ class MainWindow(QMainWindow):
             return
         model, device = self.settings.demucs_model, self.settings.demucs_device
 
+        self.player.release_stems()   # Windows не даст перезаписать открытый файл
+
         def work(t: Task):
             separate_vocals(str(orig), str(bg), str(p.project_dir / "vocals.wav"),
                             model, device, t.report, t.is_cancelled)
@@ -1326,6 +1372,7 @@ class MainWindow(QMainWindow):
                 p.mix.mode = MixMode.DUBBING
                 self.mark_dirty("Режим дубляжа")
             self.mix_panel.set_mix(p.mix, True)
+            self._load_waveform()
             self.save_project()
             self.statusBar().showMessage("Фон без голосов готов", 8000)
 
@@ -1378,6 +1425,14 @@ class MainWindow(QMainWindow):
             if not bg or not bg.exists():
                 QMessageBox.warning(self, "Экспорт", "Режим дубляжа: сначала выполните "
                                                      "«Обработка → Отделить голоса».")
+                return
+        shown = set(mixer.wave_keys(p)) & set(p.mix.muted)
+        if shown:
+            names = {"original": "оригинал", "vocals": "голоса оригинала", "background": "фон"}
+            if QMessageBox.question(
+                    self, "Экспорт",
+                    "Заглушены дорожки: " + ", ".join(names[k] for k in sorted(shown)) +
+                    ".\nВ готовом видео их не будет. Продолжить?") != QMessageBox.Yes:
                 return
         missing = [ln for ln in p.lines if line_status(p, ln) == "none"]
         if missing and QMessageBox.question(

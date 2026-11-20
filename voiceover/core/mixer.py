@@ -199,6 +199,31 @@ def duck_envelope(t0: float, n: int, sr: int, intervals: list[tuple[float, float
     return env
 
 
+def stem_paths(project: Project) -> Optional[tuple[Path, Path]]:
+    """Фон и голоса после «Отделить голоса», если оба файла на месте."""
+    bg = project.resolve(project.background_wav)
+    vo = project.project_dir / "vocals.wav"
+    if bg is not None and bg.exists() and vo.exists():
+        return bg, vo
+    return None
+
+
+def wave_keys(project: Project) -> list[str]:
+    """Дорожки звука на таймлайне: после отделения — голоса и фон, иначе оригинал."""
+    return ["vocals", "background"] if stem_paths(project) else ["original"]
+
+
+def _read_block(f: sf.SoundFile, pos: int, n: int) -> np.ndarray:
+    out = np.zeros((n, 2), np.float32)
+    if pos < f.frames:
+        f.seek(pos)
+        d = f.read(n, dtype="float32", always_2d=True)
+        if d.shape[1] == 1:
+            d = np.repeat(d, 2, axis=1)
+        out[: len(d)] = d[:, :2]
+    return out
+
+
 def _blend_original(orig_file: sf.SoundFile, bg: np.ndarray, pos: int, t0: float, sr: int,
                     speech: list[tuple[float, float]]) -> np.ndarray:
     """Фон без голосов под репликами, оригинал — вне их (с плавными переходами)."""
@@ -231,7 +256,20 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
     mix = project.mix
     bg_file: Optional[sf.SoundFile] = None
     orig_file: Optional[sf.SoundFile] = None   # дубляж: оригинал там, где нет реплик
-    if include_background:
+    voc_file: Optional[sf.SoundFile] = None    # голоса оригинала (после отделения)
+    muted = set(mix.muted)
+    stems = stem_paths(project) if include_background else None
+    if stems:
+        # Голоса отделены: основа = фон + голоса оригинала, каждую дорожку можно заглушить.
+        # Закадровый — голоса звучат (с приглушением под репликами), дубляж — убираются.
+        bg_file = sf.SoundFile(str(stems[0]))
+        voc_file = sf.SoundFile(str(stems[1]))
+        for fl in (bg_file, voc_file):
+            if fl.samplerate != sr:
+                bg_file.close()
+                voc_file.close()
+                raise RuntimeError(f"Частота {fl.name} — {fl.samplerate} Гц, нужна {sr} Гц")
+    elif include_background:
         bp = background_path(project)
         if bp is None or not bp.exists():
             if mix.mode == MixMode.DUBBING:
@@ -279,14 +317,25 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
                 n = min(chunk, end - pos)
                 t0 = pos / sr
                 buf = np.zeros((n, 2), dtype=np.float32)
-                if bg_file is not None and pos < bg_file.frames:
-                    bg_file.seek(pos)
-                    bg = bg_file.read(n, dtype="float32", always_2d=True)
-                    if bg.shape[1] == 1:
-                        bg = np.repeat(bg, 2, axis=1)
-                    bg = bg[:, :2]
+                bg = None
+                if voc_file is not None and bg_file is not None:
+                    bg = np.zeros((n, 2), np.float32)
+                    if "background" not in muted:
+                        bg += _read_block(bg_file, pos, n)
+                    if "vocals" not in muted:
+                        if mix.mode != MixMode.DUBBING:
+                            bg += _read_block(voc_file, pos, n)
+                        elif mix.dub_only_lines:
+                            keep = 1.0 - duck_envelope(t0, n, sr, speech, DUB_FADE, DUB_FADE)
+                            if keep.max() > 0:
+                                bg += _read_block(voc_file, pos, n) * keep[:, None]
+                elif bg_file is not None and pos < bg_file.frames:
+                    bg = _read_block(bg_file, pos, n)
                     if orig_file is not None:
                         bg = _blend_original(orig_file, bg, pos, t0, sr, speech)
+                    if muted & {"original", "background"}:
+                        bg[:] = 0.0
+                if bg is not None:
                     bg = bg * bg_gain
                     if mix.mode == MixMode.VOICEOVER and mix.duck_db < 0:
                         env = duck_envelope(t0, len(bg), sr, intervals,
@@ -321,6 +370,8 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
             bg_file.close()
         if orig_file is not None:
             orig_file.close()
+        if voc_file is not None:
+            voc_file.close()
         for f in clip_files.values():
             f.close()
 

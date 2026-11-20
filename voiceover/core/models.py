@@ -91,6 +91,8 @@ class MixSettings:
     # Demucs обучен на музыке и в фильмах часто принимает за голос крики, дыхание, шум толпы
     # и тихий фон — без этого в таких местах звук пропадает целиком.
     dub_only_lines: bool = True
+    # заглушённые дорожки звука (кнопки на таймлайне): original / vocals / background
+    muted: list = field(default_factory=list)
     sample_rate: int = 48000
 
     def to_dict(self) -> dict:

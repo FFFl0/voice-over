@@ -226,6 +226,10 @@ class MixPanel(QWidget):
         self.only_lines.setToolTip(
             "Вне реплик звучит оригинал. Нейросеть иногда принимает за голос крики, "
             "дыхание, шум толпы и тихий фон — без этой галочки в таких местах звук пропадает.")
+        self.track_boxes: dict[str, QCheckBox] = {}
+        self.tracks_row = QWidget()
+        self.tracks_lay = QHBoxLayout(self.tracks_row)
+        self.tracks_lay.setContentsMargins(0, 0, 0, 0)
         self.bg_status = QLabel()
         self.bg_status.setWordWrap(True)
         f = QFormLayout(self)
@@ -238,6 +242,8 @@ class MixPanel(QWidget):
         f.addRow("Громкость фона:", self.bg)
         f.addRow("Громкость голосов:", self.voices)
         f.addRow(self.normalize)
+        f.addRow("Заглушить:", self.tracks_row)
+        self.set_tracks(["original"])
         self.mode.currentIndexChanged.connect(self._save)
         self.normalize.toggled.connect(self._save)
         self.only_lines.toggled.connect(self._save)
@@ -265,9 +271,36 @@ class MixPanel(QWidget):
         self.voices.setValue(mix.voices_db)
         self.normalize.setChecked(mix.normalize_voices)
         self.only_lines.setChecked(mix.dub_only_lines)
+        self.set_muted(set(mix.muted))
         self.mix = mix
         self.set_background_status(has_background)
         self._update()
+
+    def set_tracks(self, keys: list[str]) -> None:
+        """Галочки заглушения для дорожек звука (оригинал или голоса и фон)."""
+        titles = {"original": "оригинал", "vocals": "голоса оригинала", "background": "фон"}
+        if list(self.track_boxes) == keys:
+            return
+        for cb in self.track_boxes.values():
+            self.tracks_lay.removeWidget(cb)
+            cb.deleteLater()
+        self.track_boxes = {}
+        for k in keys:
+            cb = QCheckBox(titles.get(k, k))
+            cb.setToolTip("Заглушённая дорожка не звучит ни при просмотре, ни в превью, "
+                          "ни в экспорте. То же — кнопкой у дорожки на таймлайне.")
+            cb.toggled.connect(self._save)
+            self.tracks_lay.addWidget(cb)
+            self.track_boxes[k] = cb
+        self.tracks_lay.addStretch(1)
+        if self.mix is not None:
+            self.set_muted(set(self.mix.muted))
+
+    def set_muted(self, muted: set[str]) -> None:
+        for k, cb in self.track_boxes.items():
+            cb.blockSignals(True)
+            cb.setChecked(k in muted)
+            cb.blockSignals(False)
 
     def set_background_status(self, ok: bool) -> None:
         self._has_bg = ok
@@ -301,6 +334,9 @@ class MixPanel(QWidget):
         m.voices_db = self.voices.value()
         m.normalize_voices = self.normalize.isChecked()
         m.dub_only_lines = self.only_lines.isChecked()
+        shown = set(self.track_boxes)
+        m.muted = sorted((set(m.muted) - shown)
+                         | {k for k, cb in self.track_boxes.items() if cb.isChecked()})
         self._update()
         if self.on_change:
             self.on_change()

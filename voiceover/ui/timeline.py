@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QScrollBar, QVBoxLayout, QWidget
 
@@ -18,6 +18,11 @@ LANE_H = 30
 LABEL_W = 150
 BLOCK_RADIUS = 3   # небольшое скругление блоков реплик
 EDGE_PX = 6
+SCROLL_ZONE = 36   # px у края, где перетаскивание прокручивает таймлайн
+MUTE_W = 26        # кнопка заглушения дорожки звука в колонке подписей
+
+# дорожки звука: ключ → подпись
+WAVE_TITLES = {"original": "оригинал", "vocals": "голоса", "background": "фон"}
 
 
 class TimelineCanvas(QWidget):
@@ -26,6 +31,7 @@ class TimelineCanvas(QWidget):
     lineActivated = Signal(str)      # двойной клик — проиграть реплику
     lineEdited = Signal(str)         # тайминг изменён перетаскиванием
     viewChanged = Signal()
+    muteToggled = Signal(str)        # ключ дорожки звука: original / vocals / background
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,8 +41,12 @@ class TimelineCanvas(QWidget):
         self.playhead = 0.0
         self.selected: set[str] = set()
         self.follow = True
-        self.peaks: Optional[np.ndarray] = None
+        self.waves: list[tuple[str, Optional[np.ndarray]]] = [("original", None)]
+        self.muted: set[str] = set()
         self.peaks_rate = 50
+        self.duration = 0.0
+        self._mouse_x = 0.0
+        self._autoscroll = QTimer(self, interval=16, timeout=self._autoscroll_tick)
         self.preview_range: Optional[tuple[float, float]] = None
         self._hover: Optional[str] = None
         self._drag: Optional[tuple] = None
@@ -46,8 +56,23 @@ class TimelineCanvas(QWidget):
 
     # ---------------------------------------------------------- геометрия
     @property
+    def peaks(self) -> Optional[np.ndarray]:   # волна первой дорожки (совместимость)
+        return self.waves[0][1] if self.waves else None
+
+    @peaks.setter
+    def peaks(self, pk: Optional[np.ndarray]) -> None:
+        self.waves = [("original", pk)]
+
+    @property
     def lanes_top(self) -> int:
-        return RULER_H + WAVE_H
+        return RULER_H + WAVE_H * max(1, len(self.waves))
+
+    def wave_rect(self, i: int) -> QRectF:
+        return QRectF(LABEL_W, RULER_H + i * WAVE_H, self.width() - LABEL_W, WAVE_H)
+
+    def mute_rect(self, i: int) -> QRectF:
+        return QRectF(LABEL_W - MUTE_W - 8, RULER_H + i * WAVE_H + (WAVE_H - MUTE_W) / 2,
+                      MUTE_W, MUTE_W)
 
     def lanes(self) -> list[tuple[Optional[str], str, QColor, bool]]:
         out: list[tuple[Optional[str], str, QColor, bool]] = []
@@ -98,6 +123,23 @@ class TimelineCanvas(QWidget):
     def set_peaks(self, peaks: Optional[np.ndarray], rate: int) -> None:
         self.peaks = peaks
         self.peaks_rate = rate
+        self.update()
+
+    def set_waves(self, keys: list[str]) -> None:
+        """Какие дорожки звука показывать (волны подгружаются потом через set_wave)."""
+        old = dict(self.waves)
+        self.waves = [(k, old.get(k)) for k in keys] or [("original", None)]
+        self.setMinimumHeight(self.lanes_top + LANE_H * 2)
+        self.updateGeometry()
+        self.update()
+
+    def set_wave(self, key: str, peaks: Optional[np.ndarray], rate: int) -> None:
+        self.waves = [(k, peaks if k == key else pk) for k, pk in self.waves]
+        self.peaks_rate = rate
+        self.update()
+
+    def set_muted(self, muted: set[str]) -> None:
+        self.muted = set(muted)
         self.update()
 
     def set_playhead(self, t: float) -> None:
@@ -153,20 +195,29 @@ class TimelineCanvas(QWidget):
                 p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
             t += step
 
-        # волна оригинала
-        p.fillRect(QRectF(LABEL_W, RULER_H, w - LABEL_W, WAVE_H), QColor(th.lane_alt))
-        if self.peaks is not None and len(self.peaks):
-            mid = RULER_H + WAVE_H / 2
+        # дорожки звука: оригинал или, после отделения, голоса и фон
+        for wi, (key, pk_arr) in enumerate(self.waves):
+            wr = self.wave_rect(wi)
+            p.fillRect(wr, QColor(th.lane_alt if wi % 2 == 0 else th.lane))
+            if wi:
+                p.setPen(QPen(QColor(th.border), 1))
+                p.drawLine(QPointF(LABEL_W, wr.top() + 0.5), QPointF(w, wr.top() + 0.5))
+            if pk_arr is None or not len(pk_arr):
+                continue
+            mid = wr.top() + WAVE_H / 2
             amp = WAVE_H / 2 - 4
             px = np.arange(LABEL_W, w, 2, dtype=np.float64)
             t0 = self.offset + (px - LABEL_W) / self.pps
             t1 = t0 + 2 / self.pps
-            i0 = np.clip((t0 * self.peaks_rate).astype(int), 0, len(self.peaks))
-            i1 = np.clip((t1 * self.peaks_rate).astype(int) + 1, 0, len(self.peaks))
-            pk = self.peaks.astype(np.float32)
+            i0 = np.clip((t0 * self.peaks_rate).astype(int), 0, len(pk_arr))
+            i1 = np.clip((t1 * self.peaks_rate).astype(int) + 1, 0, len(pk_arr))
+            pk = pk_arr.astype(np.float32)
             vals = np.array([pk[a:b].max() if b > a else 0.0 for a, b in zip(i0, i1)])
             vals = np.sqrt(vals)  # визуально ровнее для тихих участков
-            p.setPen(QPen(QColor(th.wave), 2, Qt.SolidLine, Qt.FlatCap))
+            wc = QColor(th.wave)
+            if key in self.muted:
+                wc.setAlpha(60)   # заглушённая дорожка — бледная волна
+            p.setPen(QPen(wc, 2, Qt.SolidLine, Qt.FlatCap))
             for x, v in zip(px, vals):
                 if v > 0.01:
                     hh = max(1.0, v * amp)
@@ -255,8 +306,27 @@ class TimelineCanvas(QWidget):
         p.drawLine(QPointF(LABEL_W - 0.5, 0), QPointF(LABEL_W - 0.5, h))
         p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
         fm = p.fontMetrics()
-        p.setPen(QColor(th.muted))
-        p.drawText(QRectF(14, RULER_H, LABEL_W - 18, WAVE_H), Qt.AlignVCenter, "оригинал")
+        for wi, (key, _pk) in enumerate(self.waves):
+            y = RULER_H + wi * WAVE_H
+            muted = key in self.muted
+            p.setPen(QColor(th.muted))
+            p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
+            p.drawText(QRectF(14, y, LABEL_W - MUTE_W - 26, WAVE_H), Qt.AlignVCenter,
+                       WAVE_TITLES.get(key, key))
+            mr = self.mute_rect(wi)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            if muted:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(th.error))
+                p.drawRoundedRect(mr, 3, 3)
+            else:
+                p.setPen(QPen(QColor(th.border), 1))
+                p.setBrush(Qt.NoBrush)
+                p.drawRoundedRect(mr.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
+            p.setRenderHint(QPainter.Antialiasing, False)
+            ic = theme.icon("mute" if muted else "volume",
+                            th.paper if muted else th.muted, 16)
+            ic.paint(p, mr.adjusted(5, 5, -5, -5).toRect())
         small = theme.body_font(theme.TEXT_SM - 1)
         for i, (_, name, col, is_rec) in enumerate(lanes):
             y = self.lanes_top + i * LANE_H
@@ -292,6 +362,11 @@ class TimelineCanvas(QWidget):
         pos = e.position()
         if e.button() != Qt.LeftButton:
             return
+        for wi, (key, _pk) in enumerate(self.waves):
+            if self.mute_rect(wi).adjusted(-3, -3, 3, 3).contains(pos):
+                self.muteToggled.emit(key)
+                return
+        self._mouse_x = pos.x()
         if pos.y() < self.lanes_top or pos.x() < LABEL_W:
             self.seekRequested.emit(max(0.0, self.t_of(max(LABEL_W, pos.x()))))
             self._drag = ("seek",)
@@ -306,7 +381,7 @@ class TimelineCanvas(QWidget):
         else:
             self.selected ^= {ln.id}
         self.lineSelected.emit(ln.id)
-        self._drag = (part, ln, pos.x(), ln.start, ln.end, False)
+        self._drag = (part, ln, self.t_of(pos.x()), ln.start, ln.end, False, pos.x())
         self.update()
 
     def mouseMoveEvent(self, e):
@@ -319,6 +394,11 @@ class TimelineCanvas(QWidget):
                 self.update()
             self.setCursor(Qt.SizeHorCursor if part in ("left", "right") else
                            (Qt.PointingHandCursor if ln else Qt.ArrowCursor))
+            on_mute = any(self.mute_rect(i).contains(pos) for i in range(len(self.waves)))
+            if on_mute:
+                self.setCursor(Qt.PointingHandCursor)
+                self.setToolTip("Заглушить / включить дорожку")
+                return
             if ln:
                 ch = self.project.character(ln.character_id) if self.project else None
                 from html import escape
@@ -327,13 +407,28 @@ class TimelineCanvas(QWidget):
             else:
                 self.setToolTip("")
             return
+        self._mouse_x = pos.x()
+        self._apply_drag(pos.x())
+        self._update_autoscroll()
+
+    def _apply_drag(self, x: float) -> None:
+        """Применить перетаскивание к точке x (вызывается и при автопрокрутке)."""
+        if self._drag is None:
+            return
+        x = min(max(LABEL_W, x), self.width())   # за краем — край, дальше прокрутка
         if self._drag[0] == "seek":
-            self.seekRequested.emit(max(0.0, self.t_of(max(LABEL_W, pos.x()))))
+            t = max(0.0, self.t_of(x))
+            if self.duration:
+                t = min(t, self.duration)
+            self.playhead = t
+            self.seekRequested.emit(t)
+            self.update()
             return
-        part, ln, x0, s0, e0, moved = self._drag
-        if abs(pos.x() - x0) < 3 and not moved:
+        part, ln, t_press, s0, e0, moved, x0 = self._drag
+        if abs(x - x0) < 3 and not moved:
             return
-        dt = (pos.x() - x0) / self.pps
+        # время, а не пиксели: при прокрутке во время перетаскивания блок едет вместе с ней
+        dt = self.t_of(x) - t_press
         if part == "move":
             dt = max(-s0, dt)
             ln.start, ln.end = s0 + dt, e0 + dt
@@ -341,8 +436,44 @@ class TimelineCanvas(QWidget):
             ln.start = min(max(0.0, s0 + dt), ln.end - 0.1)
         else:
             ln.end = max(e0 + dt, ln.start + 0.1)
-        self._drag = (part, ln, x0, s0, e0, True)
+        self._drag = (part, ln, t_press, s0, e0, True, x0)
         self.update()
+
+    def _edge_speed(self) -> float:
+        """Секунд в секунду: <0 — влево, >0 — вправо, 0 — не у края."""
+        x, w = self._mouse_x, self.width()
+        vis = self.visible_seconds()
+        if x > w - SCROLL_ZONE:
+            k = min(3.0, (x - (w - SCROLL_ZONE)) / SCROLL_ZONE)
+        elif x < LABEL_W + SCROLL_ZONE:
+            k = -min(3.0, (LABEL_W + SCROLL_ZONE - x) / SCROLL_ZONE)
+        else:
+            return 0.0
+        return k * vis * 0.6
+
+    def _update_autoscroll(self) -> None:
+        if self._drag is not None and self._edge_speed() != 0.0:
+            if not self._autoscroll.isActive():
+                self._autoscroll.start()
+        else:
+            self._autoscroll.stop()
+
+    def _autoscroll_tick(self) -> None:
+        if self._drag is None:
+            self._autoscroll.stop()
+            return
+        v = self._edge_speed()
+        if v == 0.0:
+            self._autoscroll.stop()
+            return
+        max_off = max(0.0, self.duration - self.visible_seconds()) if self.duration else None
+        new = self.offset + v * self._autoscroll.interval() / 1000
+        new = max(0.0, new if max_off is None else min(max_off, new))
+        if abs(new - self.offset) < 1e-9:
+            return
+        self.offset = new
+        self.viewChanged.emit()
+        self._apply_drag(self._mouse_x)
 
     def leaveEvent(self, e):
         if self._hover:
@@ -350,6 +481,7 @@ class TimelineCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, e):
+        self._autoscroll.stop()
         if self._drag and self._drag[0] != "seek" and self._drag[5]:
             ln = self._drag[1]
             ln.start = round(ln.start, 3)
@@ -398,10 +530,12 @@ class Timeline(QWidget):
         self.canvas.preview_range = None
         self.canvas.selected = set()
         self.duration = project.duration if project else 0.0
+        self.canvas.duration = self.duration
         self.refresh()
 
     def set_duration(self, d: float) -> None:
         self.duration = max(self.duration, d)
+        self.canvas.duration = self.duration
         self._sync_scroll()
 
     def refresh(self) -> None:
