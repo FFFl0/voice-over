@@ -399,6 +399,31 @@ class MainWindow(QMainWindow):
         tb.widgetForAction(self.a_export).setObjectName("primaryAction")
         self.toolbar = tb
 
+    def _fit_toolbar(self):
+        """Если кнопки с подписями не помещаются, второстепенные показываются только иконками
+        (подсказка остаётся), чтобы «Экспорт» всегда был виден."""
+        tb = getattr(self, "toolbar", None)
+        if tb is None:
+            return
+        keep = {self.a_export}
+        buttons = []
+        for a in tb.actions():
+            w = tb.widgetForAction(a)
+            if isinstance(w, QToolButton) and a not in keep and a.text() and \
+                    a not in (self.a_new, self.a_open, self.a_save, self.a_undo, self.a_redo,
+                              getattr(self, "a_theme", None)):
+                buttons.append(w)
+        for w in buttons:
+            w.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        need = tb.sizeHint().width()
+        if need > self.width():
+            for w in buttons:
+                w.setToolButtonStyle(Qt.ToolButtonIconOnly)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit_toolbar()
+
     def _apply_icons(self):
         th = theme.current()
         for a in self.findChildren(QAction):
