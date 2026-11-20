@@ -201,3 +201,23 @@ def test_std_streams_without_console(monkeypatch, tmp_path):
     sys.stdout.flush()
     log = tmp_path / "VoiceOverStudio" / "voiceover.log"
     assert "в журнал" in log.read_text(encoding="utf-8")
+
+
+def test_deepl_tries_other_server_on_403():
+    urls = []
+
+    def post(url, data, timeout, headers):
+        urls.append(url)
+        if url.startswith("https://api.deepl.com"):
+            return Resp(403)                       # ключ от бесплатного сервера
+        return Resp(200, {"translations": [{"text": "ок"}]})
+
+    d = T.DeepLApi("dev-key-without-fx", "vi", "ru", post=post)
+    assert d.translate_batch(["xin chào"]) == ["ок"]
+    assert d.translate_batch(["lần nữa"]) == ["ок"]
+    assert urls == ["https://api.deepl.com/v2/translate",
+                    "https://api-free.deepl.com/v2/translate",
+                    "https://api-free.deepl.com/v2/translate"]   # запомнил рабочий сервер
+    bad = T.DeepLApi("wrong", "auto", "ru", post=lambda *a, **k: Resp(403))
+    with pytest.raises(RuntimeError, match="неверный ключ"):
+        bad.translate_batch(["x"])

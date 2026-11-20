@@ -392,8 +392,12 @@ class DeepLApi:
         if target not in DEEPL_TARGET:
             raise RuntimeError(f"DeepL не переводит на язык «{target}»")
         self.key = key.strip()
-        self.url = ("https://api-free.deepl.com/v2/translate" if self.key.endswith(":fx")
-                    else "https://api.deepl.com/v2/translate")
+        free = "https://api-free.deepl.com/v2/translate"
+        pro = "https://api.deepl.com/v2/translate"
+        # Ключи бесплатного тарифа обычно оканчиваются на «:fx»; если сервер не тот,
+        # при ответе 403 пробуется второй
+        self.url, self.alt_url = (free, pro) if self.key.endswith(":fx") else (pro, free)
+        self._switched = False
         self.source = None if source in ("auto", "", None) else source.split("-")[0].upper()
         self.target = DEEPL_TARGET[target]
         self.sleep = sleep
@@ -418,7 +422,13 @@ class DeepLApi:
                 wait = min(wait * 2, 60.0)
                 continue
             if r.status_code == 403:
-                raise RuntimeError("DeepL: неверный ключ API")
+                # Ключ мог быть от другого сервера (бесплатный/платный): пробуем второй один раз
+                if not self._switched:
+                    self._switched = True
+                    self.url = self.alt_url
+                    continue
+                raise RuntimeError("DeepL: неверный ключ API (проверьте, что скопирован ключ "
+                                   "со страницы «Ключи API» целиком)")
             if r.status_code == 456:
                 raise RuntimeError("DeepL: исчерпан месячный лимит символов")
             if r.status_code >= 400:
