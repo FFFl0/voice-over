@@ -82,12 +82,15 @@ def test_export_asks_before_overwrite(win, tmp_path, monkeypatch):
             self.out = QLineEdit(str(existing))
             self.kind = QComboBox()
             self.kind.addItem("v", "video")
+            self.loudness = QComboBox()
+            self.loudness.addItem("не менять", None)
 
         def exec(self):
             return QDialog.Accepted
 
         def options(self):
-            return None
+            from voiceover.core.ffmpeg import ExportOptions
+            return ExportOptions()
 
     asked = []
     monkeypatch.setattr(mw, "ExportDialog", Dlg)
