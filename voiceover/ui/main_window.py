@@ -30,12 +30,13 @@ from . import theme
 from .characters_panel import CharactersPanel, auto_assign_voice
 from .dialogs import (SUB_FILTER, VIDEO_FILTER, ExportDialog, ImportSubsDialog, MixPanel,
                       NewProjectDialog, SettingsDialog, TranscribeDialog)
-from .lines_table import (C_CHAR, C_STATUS, C_TEXT, LinesFilter, LinesModel, RoleDelegate,
+from .lines_table import (C_CHAR, C_ORIG, C_STATUS, C_TEXT, LinesView, LinesFilter, LinesModel, RoleDelegate,
                           StatusDelegate)
 from .record_panel import RecordPanel
 from .timeline import Timeline
 from .video_player import VideoPlayer
 from .welcome import WelcomePage
+from . import text_tools
 from .workers import Task, pool
 
 PROJECT_FILTER = f"Проект озвучки (*{PROJECT_EXT})"
@@ -98,7 +99,7 @@ class MainWindow(QMainWindow):
         self.lines_model = LinesModel(self)
         self.lines_filter = LinesFilter(self)
         self.lines_filter.setSourceModel(self.lines_model)
-        self.table = QTableView()
+        self.table = LinesView()
         self.table.setModel(self.lines_filter)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -118,6 +119,10 @@ class MainWindow(QMainWindow):
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         for col, w in ((0, 56), (1, 92), (2, 92), (3, 130), (5, 112)):
             self.table.setColumnWidth(col, w)
+        self.table.setColumnWidth(C_ORIG, 240)
+        self.table.setColumnHidden(C_ORIG, True)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._table_menu)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Поиск по тексту…")
@@ -165,6 +170,11 @@ class MainWindow(QMainWindow):
         self.text_edit = QPlainTextEdit()
         self.text_edit.setPlaceholderText("Текст выделенной реплики")
         self.text_edit.setMaximumHeight(72)
+        self.orig_lbl = QLabel()
+        self.orig_lbl.setObjectName("muted")
+        self.orig_lbl.setWordWrap(True)
+        self.orig_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.orig_lbl.hide()
         self.note_edit = QLineEdit()
         self.note_edit.setPlaceholderText("Заметка для актёра: интонация, ударение…")
         self.stats = QLabel()
@@ -177,6 +187,7 @@ class MainWindow(QMainWindow):
         ll.addLayout(filt)
         ll.addWidget(self.table, 1)
         ll.addWidget(self.text_edit)
+        ll.addWidget(self.orig_lbl)
         ll.addWidget(self.note_edit)
         ll.addLayout(acts)
         ll.addWidget(self.stats)
@@ -285,6 +296,11 @@ class MainWindow(QMainWindow):
                             "Импорт реплик из SRT/ASS/VTT")
         self.a_whisper = act("Распознать", self.run_whisper, "Ctrl+R", "whisper",
                              "Распознать речь в фильме (Whisper) и создать реплики")
+        self.a_ocr = act("С видео", lambda: text_tools.run_ocr(self), "Ctrl+Shift+O", "ocr",
+                         "Субтитры из текста в кадре (распознавание вшитых субтитров)")
+        self.a_translate = act("Перевести", lambda: text_tools.translate_lines(self), "Ctrl+Shift+T",
+                               "translate", "Перевести реплики на язык озвучки")
+        self.a_restore = act("Вернуть оригинал выделенных", lambda: text_tools.restore_original(self))
         self.a_export_srt = act("Экспорт сценария (SRT с ролями)…", self.export_script)
         self.a_export = act("Экспорт", self.export, "Ctrl+E", "export",
                             "Свести озвучку и сохранить видео с новой дорожкой")
@@ -332,7 +348,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
-        for a in (self.a_whisper, self.a_separate, self.a_auto_voices, self.a_synth_all,
+        for a in (self.a_whisper, self.a_ocr, self.a_translate, self.a_restore, self.a_separate, self.a_auto_voices, self.a_synth_all,
                   self.a_synth_sel):
             m.addAction(a)
         m.addSeparator()
@@ -371,7 +387,8 @@ class MainWindow(QMainWindow):
             tb.addAction(a)
             tb.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonIconOnly)
         tb.addSeparator()
-        for a in (self.a_import, self.a_whisper, self.a_separate, self.a_synth_all, self.a_preview):
+        for a in (self.a_import, self.a_whisper, self.a_ocr, self.a_translate, self.a_separate,
+                  self.a_synth_all, self.a_preview):
             tb.addAction(a)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -438,7 +455,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_save, self.a_save_as, self.a_close, self.a_import, self.a_export,
                   self.a_export_srt, self.a_synth_all, self.a_synth_sel, self.a_preview,
                   self.a_preview_full, self.a_separate, self.a_auto_voices, self.a_whisper,
-                  self.a_cleanup):
+                  self.a_cleanup, self.a_ocr, self.a_translate, self.a_restore):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -528,6 +545,8 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self):
         self.lines_model.reset()
+        has_orig = bool(self.project) and any(ln.orig_text for ln in self.project.lines)
+        self.table.setColumnHidden(C_ORIG, not has_orig)
         self.timeline.refresh()
         self._fill_char_combos()
         self._update_stats()
@@ -964,12 +983,37 @@ class MainWindow(QMainWindow):
         self.text_edit.setEnabled(ln is not None)
         self.text_edit.blockSignals(False)
         self.note_edit.setText(ln.note if ln else "")
+        self.orig_lbl.setText(f"Оригинал: {ln.orig_text}" if ln and ln.orig_text else "")
+        self.orig_lbl.setVisible(bool(ln and ln.orig_text))
         if ln:
             self.timeline.canvas.ensure_visible(ln.start, ln.end)
             if not self.player.is_playing() and not self.record.is_recording() and not self._restoring:
                 self.player.seek(ln.start)
         self._update_record_line()
         self.timeline.canvas.update()
+
+    def _table_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        if not self.project:
+            return
+        sel = self.selected_lines()
+        m = QMenu(self)
+        a = m.addAction(f"Синтезировать выделенные ({len(sel)})")
+        a.triggered.connect(lambda: self.synthesize(True, True))
+        a.setEnabled(bool(sel))
+        src, dst = self.settings.translate_source, self.settings.translate_target
+        a = m.addAction(f"Перевести выделенные ({src} → {dst})")
+        a.triggered.connect(lambda: text_tools.translate_lines(self, self.selected_lines()))
+        a.setEnabled(bool(sel))
+        m.addAction(self.a_translate)
+        a = m.addAction("Вернуть оригинал")
+        a.triggered.connect(lambda: text_tools.restore_original(self))
+        a.setEnabled(any(ln.orig_text for ln in sel))
+        m.addSeparator()
+        a = m.addAction("Удалить")
+        a.triggered.connect(self.delete_lines)
+        a.setEnabled(bool(sel))
+        m.exec(self.table.viewport().mapToGlobal(pos))
 
     def _update_record_line(self):
         ln = self.current_line()

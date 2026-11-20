@@ -12,10 +12,16 @@ try:  # Whisper необязателен: без него сборка прох�
     hidden += collect_submodules("faster_whisper")
 except ImportError:
     pass
+try:  # OCR (RapidOCR): модели лежат внутри пакета
+    import rapidocr_onnxruntime  # noqa: F401
+    datas += collect_data_files("rapidocr_onnxruntime")
+    hidden += collect_submodules("rapidocr_onnxruntime")
+except ImportError:
+    pass
 excludes = ["tkinter", "matplotlib", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
             "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf", "onnxruntime.training"]
 if full:
-    hidden += collect_submodules("demucs")
+    hidden += collect_submodules("demucs") + collect_submodules("easyocr")
     datas += collect_data_files("demucs")
 else:
     excludes += ["torch", "torchaudio", "demucs", "torchvision"]
