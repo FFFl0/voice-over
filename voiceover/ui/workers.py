@@ -43,19 +43,24 @@ class Task(QRunnable):
         self.signals.message.emit(obj)
 
     def run(self) -> None:
+        def emit(sig, *args):
+            try:
+                sig.emit(*args)
+            except RuntimeError:   # окно уже закрыто — результат никому не нужен
+                pass
         try:
             res = self.fn(self)
             if self._cancel:
-                self.signals.cancelled.emit()
+                emit(self.signals.cancelled)
             else:
-                self.signals.result.emit(res)
+                emit(self.signals.result, res)
         except Cancelled:
-            self.signals.cancelled.emit()
+            emit(self.signals.cancelled)
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
-            self.signals.error.emit(str(e) or e.__class__.__name__)
+            emit(self.signals.error, str(e) or e.__class__.__name__)
         finally:
-            self.signals.finished.emit()
+            emit(self.signals.finished)
 
 
 def pool() -> QThreadPool:

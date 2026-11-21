@@ -40,6 +40,7 @@ class RecordPanel(QWidget):
     requestLine = Signal(int)         # перейти к соседней реплике: -1 / +1
     playTake = Signal(str)            # путь к файлу дубля
     alignRequested = Signal(str)      # id реплики: подогнать запись к оригиналу
+    lineChanged = Signal(object, str)      # реплика (или None) и текст следующей — окну актёра
     cueState = Signal(str, float, float)   # режим отсчёта, секунд до реплики, прошло (cue.py)
 
     def __init__(self, player: VideoPlayer, settings: AppSettings, parent=None):
@@ -52,6 +53,7 @@ class RecordPanel(QWidget):
         self._rec_path = ""
         self._rec_t0 = 0.0
         self.loop_pending = False   # пауза между дублями при записи по кругу
+        self.next_text = ""
         self._get_neighbors: Optional[Callable[[], tuple[str, str]]] = None
 
         self.device = QComboBox()
@@ -299,6 +301,8 @@ class RecordPanel(QWidget):
         if self.rec and self.rec.recording:
             return
         self.line = ln
+        self.next_text = next_text
+        self.lineChanged.emit(ln, next_text)
         if ln is None or not self.project:
             self.prompt.setText("Выберите реплику в таблице")
             for w in (self.who, self.when, self.length, self.note, self.prev_lbl, self.next_lbl):

@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(theme.app_icon())
         self.resize(1560, 940)
         self._build_ui()
+        self.actor_win = None   # окно актёра (Ctrl+Shift+A)
         self._build_actions()
         self.apply_hotkeys()
         self._apply_icons()
@@ -370,6 +371,10 @@ class MainWindow(QMainWindow):
         self.a_align = act("Подогнать записи к оригиналу", lambda: self.align_recordings(),
                            "Ctrl+L", None, "Сдвинуть записи выделенных реплик так, чтобы слоги "
                            "и паузы совпали с голосом оригинала")
+        self.a_actor = act("Окно актёра", self.toggle_actor_window, "Ctrl+Shift+A", "user",
+                           "Видео с отсчётом, суфлёром и ритмо-лентой отдельным окном — "
+                           "на второй монитор или во весь экран")
+        self.a_actor.setCheckable(True)
         self.a_preview = act("Превью", lambda: self.build_preview(60), "F6", "preview",
                              "Свести минуту от курсора и слушать вместе с видео")
         self.a_preview_full = act("Превью всего фильма", lambda: self.build_preview(None), "Shift+F6")
@@ -460,7 +465,7 @@ class MainWindow(QMainWindow):
             tb.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonIconOnly)
         for title, actions in (("Текст", (self.a_import, self.a_whisper, self.a_translate)),
                                ("Звук", (self.a_separate,)),
-                               ("Проверка", (self.a_preview,))):
+                               ("Проверка", (self.a_preview, self.a_actor))):
             tb.addSeparator()
             lbl = QLabel(title)
             lbl.setObjectName("groupLabel")
@@ -729,6 +734,8 @@ class MainWindow(QMainWindow):
         self.lines_model.set_project(p)
         self.timeline.set_project(p)
         self.rythmo.set_project(p)
+        if self.actor_win is not None:
+            self.actor_win.set_project(p)
         self.chars.set_project(p)
         self.record.set_project(p)
         bg = p.resolve(p.background_wav) if p else None
@@ -1190,6 +1197,23 @@ class MainWindow(QMainWindow):
         self._apply_track_mutes()
         self.mark_dirty("Восстановление из копии")
         self.statusBar().showMessage("Проект восстановлен из копии — отменить: Ctrl+Z", 6000)
+
+    def toggle_actor_window(self, on: bool = True):
+        from .actor_window import ActorWindow
+        if self.actor_win is not None:
+            self.actor_win.close()
+            return
+        if not on:
+            return
+        w = ActorWindow(self)
+        w.closed.connect(self._actor_closed)
+        self.actor_win = w
+        self.a_actor.setChecked(True)
+        w.place()
+
+    def _actor_closed(self):
+        self.actor_win = None
+        self.a_actor.setChecked(False)
 
     def _open_batch(self):
         from .batch_dialog import open_batch
@@ -1878,6 +1902,8 @@ class MainWindow(QMainWindow):
         if not self.maybe_save():
             e.ignore()
             return
+        if self.actor_win is not None:
+            self.actor_win.close()
         self.record.shutdown()
         self.settings.save()
         QApplication.instance().removeEventFilter(self)
