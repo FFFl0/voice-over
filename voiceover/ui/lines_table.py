@@ -11,11 +11,15 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QComboBox, QStyle, QStyledItemDelegate, QTableView
 
 from ..core.models import Line, Project, line_status
+from ..core.rythmo import rate_level, speech_rate
 from ..core.subtitles import fmt_clock, parse_ts
 from . import theme
 
-COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "Статус", "Оригинал"]
-C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS, C_ORIG = range(7)
+COLS = ["№", "Начало", "Конец", "Персонаж", "Текст", "Статус", "Темп", "Оригинал"]
+C_NUM, C_START, C_END, C_CHAR, C_TEXT, C_STATUS, C_RATE, C_ORIG = range(8)
+RATE_TIP = ("Темп: слогов в секунду, которые нужно произнести в отведённое время.\n"
+            "До 6.5 — спокойно, до 8 — быстро, больше — актёр не успеет:\n"
+            "сократите текст или растяните реплику.")
 
 STATUS_TEXT = {
     "rec": "записано",
@@ -115,6 +119,9 @@ class LinesModel(QAbstractTableModel):
                 return ln.text
             if c == C_STATUS:
                 return STATUS_TEXT[line_status(self.project, ln)]
+            if c == C_RATE:
+                r = speech_rate(ln)
+                return f"{r:.1f}" if r else ""
             if c == C_ORIG:
                 return ln.orig_text
         elif role == Qt.EditRole:
@@ -130,10 +137,14 @@ class LinesModel(QAbstractTableModel):
                 return ln.orig_text
         elif role == Qt.CheckStateRole and c == C_NUM:
             return Qt.Checked if ln.enabled else Qt.Unchecked
+        elif role == Qt.ForegroundRole and c == C_RATE:
+            lvl = rate_level(speech_rate(ln))
+            th = theme.current()
+            return QBrush(QColor({"ok": th.muted, "fast": th.warn, "too_fast": th.error}[lvl]))
         elif role == Qt.ForegroundRole:
             if not ln.enabled or c in (C_NUM, C_START, C_END, C_ORIG):
                 return QBrush(QColor(theme.current().muted))
-        elif role == Qt.FontRole and c in (C_NUM, C_START, C_END):
+        elif role == Qt.FontRole and c in (C_NUM, C_START, C_END, C_RATE):
             return theme.body_font(theme.TEXT_SM, tabular=True)
         elif role == Qt.UserRole + 1:   # ключ статуса для делегата
             return line_status(self.project, ln)
@@ -147,6 +158,8 @@ class LinesModel(QAbstractTableModel):
                 tip += f"\n\nЗаметка: {ln.note}" if ln.note else ""
                 from html import escape   # подсказка Qt распознаёт HTML — показываем как текст
                 return "<qt>" + escape(tip).replace("\n", "<br>") + "</qt>"
+            if c == C_RATE:
+                return RATE_TIP
             if c == C_NUM:
                 return "Снимите галочку, чтобы исключить реплику из озвучки"
         elif role == Qt.UserRole:
@@ -205,6 +218,8 @@ class LinesFilter(QSortFilterProxyModel):
             return False
         if self.character_id != "*" and ln.character_id != self.character_id:
             return False
+        if self.status == "fast":
+            return rate_level(speech_rate(ln)) != "ok"
         if self.status != "*" and line_status(m.project, ln) != self.status:
             return False
         return True

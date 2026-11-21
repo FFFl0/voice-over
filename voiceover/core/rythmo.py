@@ -68,3 +68,24 @@ def word_times(line) -> list[tuple[float, float, str]]:
         out.append((t, t + w * k, tok))
         t += (w + p) * k
     return out
+
+
+# Темп речи, слогов в секунду: до RATE_OK — спокойно, до RATE_FAST — быстро, но реально,
+# выше — актёр не успеет (перевод нужно сократить или растянуть реплику)
+RATE_OK = 6.5
+RATE_FAST = 8.0
+
+
+def speech_rate(line) -> float:
+    text = spoken_text(line.text)
+    if not text:
+        return 0.0
+    n = sum(syllables(w) for w in text.split())
+    if len(text.split()) == 1 and _CJK.search(text):
+        n = len(_CJK.findall(text))
+    return n / max(0.2, line.end - line.start)
+
+
+def rate_level(rate: float) -> str:
+    """ok | fast | too_fast"""
+    return "too_fast" if rate > RATE_FAST else ("fast" if rate > RATE_OK else "ok")

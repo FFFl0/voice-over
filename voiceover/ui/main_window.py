@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(C_TEXT, QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        for col, w in ((0, 56), (1, 92), (2, 92), (3, 130), (5, 112)):
+        for col, w in ((0, 56), (1, 92), (2, 92), (3, 130), (5, 112), (6, 58)):
             self.table.setColumnWidth(col, w)
         self.table.setColumnWidth(C_ORIG, 240)
         self.table.setColumnHidden(C_ORIG, True)
@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         self.f_status = QComboBox()
         for label, key in (("Все статусы", "*"), ("Нет записи", "none"),
                            ("Записаны", "rec"), ("Без роли", "nochar"),
-                           ("Выключены", "off")):
+                           ("Выключены", "off"), ("Слишком быстрые", "fast")):
             self.f_status.addItem(label, key)
         filt = QHBoxLayout()
         filt.addWidget(self.search, 1)

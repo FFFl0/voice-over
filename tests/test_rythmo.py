@@ -69,3 +69,12 @@ def test_band_widget(tmp_path):
     assert band.now() >= 2.5
     band.set_playing(False)
     del app
+
+
+def test_speech_rate():
+    from voiceover.core.rythmo import rate_level, speech_rate
+    assert abs(speech_rate(Line(0, 1, "Я стану Хокаге!")) - 6.0) < 1e-6
+    assert rate_level(speech_rate(Line(0, 1, "Я стану Хокаге!"))) == "ok"
+    long_ru = Line(0, 1, "Я обязательно стану самым сильным")
+    assert rate_level(speech_rate(long_ru)) == "too_fast"
+    assert speech_rate(Line(0, 1, "(смеётся)")) == 0.0
