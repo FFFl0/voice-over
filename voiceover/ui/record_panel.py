@@ -40,6 +40,7 @@ class RecordPanel(QWidget):
     requestLine = Signal(int)         # перейти к соседней реплике: -1 / +1
     playTake = Signal(str)            # путь к файлу дубля
     alignRequested = Signal(str)      # id реплики: подогнать запись к оригиналу
+    cueState = Signal(str, float, float)   # режим отсчёта, секунд до реплики, прошло (cue.py)
 
     def __init__(self, player: VideoPlayer, settings: AppSettings, parent=None):
         super().__init__(parent)
@@ -444,6 +445,7 @@ class RecordPanel(QWidget):
         if manual and self.loop_pending:   # «Стоп» в паузе между дублями — круг окончен
             self.loop_pending = False
             self.countdown.setText("")
+            self.cueState.emit("", 0.0, 0.0)
             return
         if not self.rec or not self.rec.recording:
             return
@@ -451,6 +453,7 @@ class RecordPanel(QWidget):
         self.player.pause()
         self.player.set_muted(False)
         self.countdown.setText("")
+        self.cueState.emit("", 0.0, 0.0)
         ln = self.line
         if ln is None or not self.project:
             return
@@ -478,6 +481,7 @@ class RecordPanel(QWidget):
             self.alignRequested.emit(ln.id)
         if self.loop.isChecked() and not manual:
             self.countdown.setText("Следующий дубль…")
+            self.cueState.emit("next", 0.0, 0.0)
             self.loop_pending = True
             QTimer.singleShot(900, self._loop_again)
         elif self.auto_next.isChecked() and self.auto_stop.isChecked():
@@ -504,14 +508,17 @@ class RecordPanel(QWidget):
             self.meter.setValue(int(1000 * (1 - to_start / pre)))
             self.countdown.setText(f"Приготовьтесь, {to_start:.1f} с")
             self.countdown.setStyleSheet(f"color:{th.muted}")
+            self.cueState.emit("prep", to_start, time.monotonic() - self._rec_t0)
         elif t <= self.line.end:
             self.meter.setValue(int(1000 * (t - self.line.start) / max(0.01, self.line.duration)))
             self.countdown.setText("Говорите")
             self.countdown.setStyleSheet(f"color:{th.ink}")
+            self.cueState.emit("speak", 0.0, max(0.0, t - self.line.start))
         else:
             self.meter.setValue(1000)
             self.countdown.setText("Запись идёт, можно остановить")
             self.countdown.setStyleSheet(f"color:{th.muted}")
+            self.cueState.emit("tail", 0.0, max(0.0, t - self.line.start))
         if (self.auto_stop.isChecked() or self.loop.isChecked()) and \
                 t > self.line.end + self.settings.record_postroll:
             self.stop_recording()

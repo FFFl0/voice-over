@@ -305,6 +305,9 @@ class MainWindow(QMainWindow):
         self.chars.listChanged.connect(self._on_chars_list_changed)
         self.chars.filterRequested.connect(self._filter_character)
         self.record.recorded.connect(lambda i: self._on_line_edited(i, "Запись реплики"))
+        from .cue import CueOverlay
+        self.cue_overlay = CueOverlay(self.player.video, self)
+        self.record.cueState.connect(self.cue_overlay.set_state)
         self.record.alignRequested.connect(lambda i: self.align_recordings([i], quiet=False))
         self.record.requestLine.connect(self._step_line)
         self.record.playTake.connect(self._play_take)
