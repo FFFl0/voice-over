@@ -67,6 +67,8 @@ class Line:
     # Тайминг слов от Whisper — доли длительности реплики [[0..1, 0..1, слово]].
     # Нужен ритмо-ленте; если текст потом изменили, слова расставляются по слогам.
     words: list = field(default_factory=list)
+    # Сдвиги всех дублей (путь → сдвиг), чтобы при выборе другого дубля синхрон сохранился
+    takes: dict = field(default_factory=dict)
 
     @property
     def duration(self) -> float:

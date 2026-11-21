@@ -949,11 +949,13 @@ class MainWindow(QMainWindow):
             return
         if QMessageBox.question(
                 self, "Очистка",
-                f"Будут удалены неиспользуемые дубли и синтез ({len(junk)} файлов) и кэш сведения "
+                f"Будут удалены дубли, не выбранные для сведения ({len(junk)} файлов), и кэш сведения "
                 f"({len(cache_files)}), всего {size:.0f} МБ.\nПродолжить?") != QMessageBox.Yes:
             return
         for f in junk + cache_files:
             f.unlink(missing_ok=True)
+        for ln in p.lines:   # забыть сдвиги удалённых дублей
+            ln.takes = {k: v for k, v in ln.takes.items() if p.resolve(k).exists()}
         self.refresh_all()
         self.statusBar().showMessage(f"Освобождено {size:.0f} МБ", 6000)
 

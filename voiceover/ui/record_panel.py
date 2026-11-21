@@ -16,6 +16,7 @@ from ..core.mixer import silence_bounds
 from ..core.models import Line, Project
 from ..core.recorder import Recorder, find_device, input_devices, sd_available
 from ..core.settings import AppSettings
+from ..core.takes import delete_take, list_takes, remember_offset, select_take
 from . import theme
 from .video_player import VideoPlayer
 
@@ -97,7 +98,8 @@ class RecordPanel(QWidget):
         self.btn_stop = QPushButton(theme.icon("stop"), " Стоп")
         self.btn_play = QPushButton(theme.icon("headphones"), " Дубль")
         self.btn_play.setToolTip("Прослушать запись вместе с видео")
-        self.btn_del = QPushButton(theme.icon("trash"), " Удалить запись")
+        self.btn_del = QPushButton(theme.icon("trash"), "")
+        self.btn_del.setToolTip("Удалить выбранный дубль с диска")
         self.btn_prev = QPushButton(theme.icon("back"), "")
         self.btn_prev.setToolTip("Предыдущая реплика этой роли")
         self.btn_next = QPushButton(theme.icon("fwd"), "")
@@ -108,8 +110,10 @@ class RecordPanel(QWidget):
         self.offset.setDecimals(3)
         self.offset.setSuffix(" с")
         self.offset.setToolTip("Сдвиг записи относительно начала реплики (подгонка синхрона)")
-        self.take_lbl = QLabel()
-        self.take_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
+        self.take_box = QComboBox()
+        self.take_box.setToolTip("Дубли реплики. Выбранный идёт в сведение; остальные хранятся, "
+                                 "к ним можно вернуться. Слушать — P.")
+        self.take_box.setMinimumWidth(200)
 
         form = QFormLayout()
         dev_row = QHBoxLayout()
@@ -128,10 +132,12 @@ class RecordPanel(QWidget):
         for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_next):
             btns.addWidget(b)
         take = QHBoxLayout()
+        take.addWidget(QLabel("Дубль:"))
+        take.addWidget(self.take_box, 1)
+        take.addWidget(self.btn_del)
+        take.addSpacing(12)
         take.addWidget(QLabel("Сдвиг:"))
         take.addWidget(self.offset)
-        take.addWidget(self.take_lbl, 1)
-        take.addWidget(self.btn_del)
 
         card = QFrame()
         card.setObjectName("well")
@@ -172,6 +178,7 @@ class RecordPanel(QWidget):
         self.btn_prev.clicked.connect(lambda: self.requestLine.emit(-1))
         self.btn_next.clicked.connect(lambda: self.requestLine.emit(1))
         self.offset.valueChanged.connect(self._offset_changed)
+        self.take_box.activated.connect(self._take_chosen)
         self.preroll.valueChanged.connect(lambda v: setattr(self.settings, "record_preroll", v))
 
         self.timer = QTimer(self, interval=50, timeout=self._tick)
@@ -265,21 +272,38 @@ class RecordPanel(QWidget):
         recording = bool(self.rec and self.rec.recording)
         has_take = bool(has_line and self.line.rec_path and self.project
                         and self.project.resolve(self.line.rec_path).exists())
+        self._fill_takes()
         self.btn_rec.setEnabled(has_line and not recording)
         self.btn_stop.setEnabled(recording)
         self.btn_play.setEnabled(has_take and not recording)
         self.btn_del.setEnabled(has_take and not recording)
+        self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
         self.offset.setEnabled(has_take and not recording)
         self.btn_prev.setEnabled(not recording)
         self.btn_next.setEnabled(not recording)
-        if has_take:
-            p = self.project.resolve(self.line.rec_path)
-            try:
-                self.take_lbl.setText(f"Дубль: {sf.info(str(p)).duration:.1f} с")
-            except Exception:
-                self.take_lbl.setText("Дубль есть")
-        else:
-            self.take_lbl.setText("Записи нет")
+
+    def _fill_takes(self):
+        import datetime
+        self.take_box.blockSignals(True)
+        self.take_box.clear()
+        self.take_box.addItem("— без записи —", "")
+        if self.line is not None and self.project is not None:
+            for tk in list_takes(self.project, self.line):
+                when = datetime.datetime.fromtimestamp(tk.mtime).strftime("%H:%M")
+                self.take_box.addItem(f"Дубль {tk.number} · {tk.duration:.1f} с · {when}", tk.rel)
+            i = self.take_box.findData(self.line.rec_path or "")
+            self.take_box.setCurrentIndex(max(0, i))
+        self.take_box.blockSignals(False)
+
+    def _take_chosen(self, i: int):
+        if not self.line:
+            return
+        rel = self.take_box.itemData(i) or ""
+        if rel == self.line.rec_path:
+            return
+        select_take(self.line, rel)
+        self.set_line(self.line)
+        self.recorded.emit(self.line.id)
 
     # ---------------------------------------------------------- запись
     def start_recording(self):
@@ -332,9 +356,11 @@ class RecordPanel(QWidget):
                 sf.write(self._rec_path, data[a:b], sr, subtype="PCM_24")
         except Exception:
             pass
-        # Прежние дубли не удаляем: к ним можно вернуться через «Отменить»
+        # Прежние дубли не удаляем: они остаются в списке «Дубль»
+        remember_offset(ln)
         ln.rec_path = self.project.relative(Path(self._rec_path))
         ln.rec_offset = round(offset, 3)
+        remember_offset(ln)
         self.set_line(ln)
         self.recorded.emit(ln.id)
         if self.auto_next.isChecked() and self.auto_stop.isChecked():
@@ -374,15 +400,19 @@ class RecordPanel(QWidget):
     def _delete_take(self):
         if not self.line or not self.project:
             return
-        # файл остаётся на диске, чтобы удаление можно было отменить
-        self.line.rec_path = ""
-        self.line.rec_offset = 0.0
+        rel = self.line.rec_path
+        if not rel or QMessageBox.question(
+                self, "Удалить дубль", "Удалить этот дубль с диска? Это нельзя отменить."
+        ) != QMessageBox.Yes:
+            return
+        delete_take(self.project, self.line, rel)
         self.set_line(self.line)
         self.recorded.emit(self.line.id)
 
     def _offset_changed(self, v: float):
         if self.line:
             self.line.rec_offset = v
+            remember_offset(self.line)
             self.recorded.emit(self.line.id)
 
     def is_recording(self) -> bool:
