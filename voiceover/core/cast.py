@@ -13,7 +13,7 @@ from typing import Optional
 
 from .models import Character, Project
 
-VOICE_FIELDS = ("color", "volume_db", "actor")
+VOICE_FIELDS = ("color", "volume_db", "actor", "effect", "compress", "match_eq")
 
 
 def library_path() -> Path:

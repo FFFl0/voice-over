@@ -11,7 +11,7 @@ from typing import Callable, Optional
 import numpy as np
 import soundfile as sf
 
-from . import ffmpeg
+from . import ffmpeg, fx
 from .models import Line, MixMode, Project
 
 ProgressCb = Callable[[float, str], None]
@@ -126,6 +126,12 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
     clips: list[Clip] = []
     warnings: list[str] = []
     todo = [i for i, ln in enumerate(lines) if ln.end >= t_from - 2 and ln.start <= t_to]
+    # образец звука оригинала для подгонки тембра: голоса после отделения или весь оригинал
+    ref_path = project.project_dir / "vocals.wav"
+    if not ref_path.exists():
+        ref_path = project.resolve(project.original_wav)
+    if ref_path is not None and not ref_path.exists():
+        ref_path = None
     for k, i in enumerate(todo):
         if cancel and cancel():
             raise ffmpeg.Cancelled()
@@ -140,13 +146,34 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
         ch = project.character(ln.character_id)
         mtime = os.path.getmtime(src)
 
-        # приводим к mono float32 нужной частоты (запись не обрезается — сдвиг уже учтён)
-        path = cache / f"b_{_cache_key(src, mtime, sr, True)}.wav"
+        # приводим к mono float32 нужной частоты (запись не обрезается — сдвиг уже учтён),
+        # затем шумоподавление, подгонка тембра и эффект роли
+        dn = round(project.mix.denoise, 2)
+        fx_chain = fx.effect_filter(ch.effect, ch.compress) if ch else ""
+        meq = bool(ch and ch.match_eq and ref_path is not None)
+        key = _cache_key(src, mtime, sr, True, dn, fx_chain,
+                         (ref_path, round(ln.start, 2), round(ln.end, 2)) if meq else "")
+        path = cache / f"b_{key}.wav"
         if not path.exists():
             tmp = path.with_suffix(".tmp.wav")
             ffmpeg.convert_audio(str(src), str(tmp), sr)
             data, _ = sf.read(str(tmp), dtype="float32")
             tmp.unlink(missing_ok=True)
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            if dn > 0:
+                data = fx.denoise(data, sr, dn)
+            if meq:
+                ref = fx.read_reference(ref_path, ln.start, ln.end, sr)
+                if ref is not None:
+                    data = fx.match_eq(data, ref, sr)
+            if fx_chain:
+                sf.write(str(tmp), data, sr, subtype="FLOAT")
+                tmp2 = path.with_suffix(".fx.wav")
+                ffmpeg.convert_audio(str(tmp), str(tmp2), sr, filters=fx_chain)
+                tmp.unlink(missing_ok=True)
+                data, _ = sf.read(str(tmp2), dtype="float32")
+                tmp2.unlink(missing_ok=True)
             sf.write(str(path), data, sr, subtype="FLOAT")
         if sf.info(str(path)).frames == 0:
             continue

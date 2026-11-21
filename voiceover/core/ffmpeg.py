@@ -213,11 +213,13 @@ def _atempo_chain(factor: float) -> str:
 
 
 def convert_audio(src: str, dst: str, sample_rate: int = 48000, tempo: float = 1.0,
-                  mono: bool = True) -> None:
+                  mono: bool = True, filters: str = "") -> None:
     """Перекодировать в WAV с нужной частотой, при необходимости изменить темп без смены тона."""
     af = []
     if abs(tempo - 1.0) > 1e-3:
         af.append(_atempo_chain(tempo))
+    if filters:   # эффекты рассчитаны на 48 кГц — сначала приводим частоту
+        af += [f"aresample={sample_rate}", filters]
     args = ["-i", src]
     if af:
         args += ["-af", ",".join(af)]

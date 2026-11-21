@@ -222,6 +222,16 @@ class MixPanel(QWidget):
         self.bg = self._spin(-40, 12, " дБ", "Громкость оригинала / фона")
         self.voices = self._spin(-30, 20, " дБ", "Общая громкость голосов")
         self.normalize = QCheckBox("Выравнивать громкость записей")
+        self.denoise = QDoubleSpinBox()
+        self.denoise.setRange(0, 100)
+        self.denoise.setSingleStep(10)
+        self.denoise.setDecimals(0)
+        self.denoise.setSuffix(" %")
+        self.denoise.setSpecialValueText("выкл.")
+        self.denoise.setToolTip("Шумоподавление записей: убирает шум компьютера, улицы, гул и "
+                                "низкочастотные удары. 30–60 % обычно достаточно; слишком "
+                                "много — голос звучит «булькающе».")
+        self.denoise.valueChanged.connect(self._save)
         self.only_lines = QCheckBox("Убирать голоса только под репликами")
         self.only_lines.setToolTip(
             "Вне реплик звучит оригинал. Нейросеть иногда принимает за голос крики, "
@@ -242,6 +252,7 @@ class MixPanel(QWidget):
         f.addRow("Громкость фона:", self.bg)
         f.addRow("Громкость голосов:", self.voices)
         f.addRow(self.normalize)
+        f.addRow("Шумоподавление:", self.denoise)
         f.addRow("Заглушить:", self.tracks_row)
         self.set_tracks(["original"])
         self.mode.currentIndexChanged.connect(self._save)
@@ -270,6 +281,7 @@ class MixPanel(QWidget):
         self.bg.setValue(mix.background_db)
         self.voices.setValue(mix.voices_db)
         self.normalize.setChecked(mix.normalize_voices)
+        self.denoise.setValue(round(mix.denoise * 100))
         self.only_lines.setChecked(mix.dub_only_lines)
         self.set_muted(set(mix.muted))
         self.mix = mix
@@ -333,6 +345,7 @@ class MixPanel(QWidget):
         m.background_db = self.bg.value()
         m.voices_db = self.voices.value()
         m.normalize_voices = self.normalize.isChecked()
+        m.denoise = round(self.denoise.value() / 100, 2)
         m.dub_only_lines = self.only_lines.isChecked()
         shown = set(self.track_boxes)
         m.muted = sorted((set(m.muted) - shown)

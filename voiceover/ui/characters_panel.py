@@ -7,7 +7,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
-from PySide6.QtWidgets import (QColorDialog, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPushButton, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
@@ -126,6 +126,15 @@ class CharactersPanel(QWidget):
         self.volume.setSingleStep(0.5)
         self.volume.setSuffix(" дБ")
         self.volume.setToolTip("Громкость записей этого персонажа при сведении")
+        from ..core.fx import EFFECTS
+        self.effect = QComboBox()
+        for k, (title, _f) in EFFECTS.items():
+            self.effect.addItem(title, k)
+        self.effect.setToolTip("Обработка голоса роли при сведении: рация, телефон, эхо зала…")
+        self.compress = QCheckBox("Компрессор (ровнее громкость внутри фразы)")
+        self.match_eq = QCheckBox("Тембр как в оригинале")
+        self.match_eq.setToolTip("Подогнать окраску записи (микрофон, комната) под звук "
+                                 "оригинала в этой сцене, не больше ±6 дБ по полосам")
         self.btn_lines = QPushButton(theme.icon("list"), " Показать реплики")
         self.count_lbl = QLabel()
 
@@ -133,6 +142,9 @@ class CharactersPanel(QWidget):
         f.addRow("Цвет:", self.color_btn)
         f.addRow("Актёр:", self.actor)
         f.addRow("Громкость:", self.volume)
+        f.addRow("Эффект:", self.effect)
+        f.addRow(self.compress)
+        f.addRow(self.match_eq)
         f.addRow(self.btn_lines)
         f.addRow(self.count_lbl)
 
@@ -154,6 +166,9 @@ class CharactersPanel(QWidget):
         self.name.editingFinished.connect(self._save)
         self.actor.editingFinished.connect(self._save)
         self.volume.valueChanged.connect(self._save)
+        self.effect.currentIndexChanged.connect(self._save)
+        self.compress.toggled.connect(self._save)
+        self.match_eq.toggled.connect(self._save)
         self.btn_lines.clicked.connect(
             lambda: self.current() and self.filterRequested.emit(self.current().id))
         self.box.setEnabled(False)
@@ -216,6 +231,9 @@ class CharactersPanel(QWidget):
         self.color_btn.setStyleSheet(f"background:{c.color}; border:0")
         self.actor.setText(c.actor)
         self.volume.setValue(c.volume_db)
+        self.effect.setCurrentIndex(max(0, self.effect.findData(c.effect)))
+        self.compress.setChecked(c.compress)
+        self.match_eq.setChecked(c.match_eq)
         n = sum(1 for ln in self.project.lines if ln.character_id == c.id) if self.project else 0
         self.count_lbl.setText(lines_word(n))
         self._loading = False
@@ -234,6 +252,9 @@ class CharactersPanel(QWidget):
                 c.name = name
         c.actor = self.actor.text().strip()
         c.volume_db = self.volume.value()
+        c.effect = self.effect.currentData() or ""
+        c.compress = self.compress.isChecked()
+        c.match_eq = self.match_eq.isChecked()
         self.changed.emit()
         if c.name != old_name or c.actor != old_actor:
             self.reload(c.id)
