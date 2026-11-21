@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -14,6 +14,7 @@ class SubLine:
     text: str
     speaker: str = ""   # Actor/Name из ASS, <v> из VTT, префикс «Имя:» из SRT
     style: str = ""     # стиль ASS
+    words: list = field(default_factory=list)   # [[начало, конец, слово]] от Whisper
 
 
 def read_text_file(path: str | Path) -> str:

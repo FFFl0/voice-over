@@ -80,7 +80,8 @@ def split_segment(seg: Segment, max_len: float = 7.0, min_len: float = 1.0,
         part, cur = cur[:upto], cur[upto:]
         if part:
             text = "".join(w.word for w in part).strip()
-            out.append(SubLine(part[0].start, part[-1].end, text))
+            out.append(SubLine(part[0].start, part[-1].end, text,
+                               words=[[w.start, w.end, w.word.strip()] for w in part]))
 
     for w in words:
         if cur and w.start - cur[-1].end > max_gap:

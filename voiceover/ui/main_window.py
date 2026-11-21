@@ -98,6 +98,10 @@ class MainWindow(QMainWindow):
         ll0.setContentsMargins(0, 0, 0, 0)
         ll0.setSpacing(0)
         ll0.addWidget(self.player, 1)
+        from .rythmo import RythmoBand
+        self.rythmo = RythmoBand()
+        self.rythmo.setVisible(self.settings.rythmo_band)
+        ll0.addWidget(self.rythmo)
         ll0.addWidget(self.now_bar)
 
         # ---- вкладка «Реплики»
@@ -275,6 +279,9 @@ class MainWindow(QMainWindow):
         # ---- сигналы
         self.player.positionChanged.connect(self.timeline.canvas.set_playhead)
         self.player.positionChanged.connect(self._update_now_line)
+        self.player.positionChanged.connect(self.rythmo.set_time)
+        self.player.playingChanged.connect(self.rythmo.set_playing)
+        self.rythmo.seekRequested.connect(self.player.seek)
         self.player.durationChanged.connect(self.timeline.set_duration)
         self.timeline.canvas.seekRequested.connect(self.player.seek)
         self.timeline.canvas.lineSelected.connect(self._select_line_from_timeline)
@@ -372,6 +379,13 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_preview_full)
 
         m = mb.addMenu("&Вид")
+        self.a_rythmo = QAction("Ритмо-лента под видео", self, checkable=True)
+        self.a_rythmo.setShortcut("Ctrl+B")
+        self.a_rythmo.setChecked(self.settings.rythmo_band)
+        self.a_rythmo.toggled.connect(self._toggle_rythmo)
+        self.addAction(self.a_rythmo)
+        m.addAction(self.a_rythmo)
+        m.addSeparator()
         grp = QActionGroup(self)
         self.theme_actions = {}
         for key, title in (("dark", "Тёмная тема"), ("light", "Светлая тема")):
@@ -593,11 +607,18 @@ class MainWindow(QMainWindow):
         for key, col in (("none", th.error),):
             self.stat_labels[key].setStyleSheet(f"color:{col}" if counts.get(key) else "")
 
+    def _toggle_rythmo(self, on: bool):
+        self.settings.rythmo_band = on
+        self.settings.save()
+        self.rythmo.setVisible(on)
+        self.rythmo.set_playing(self.player.is_playing())
+
     def refresh_all(self):
         self.lines_model.reset()
         has_orig = bool(self.project) and any(ln.orig_text for ln in self.project.lines)
         self.table.setColumnHidden(C_ORIG, not has_orig)
         self.timeline.refresh()
+        self.rythmo.update()
         self._fill_char_combos()
         self._update_stats()
         self._update_now_line(self.player.position())
@@ -659,6 +680,7 @@ class MainWindow(QMainWindow):
         self.history.reset(p)
         self.lines_model.set_project(p)
         self.timeline.set_project(p)
+        self.rythmo.set_project(p)
         self.chars.set_project(p)
         self.record.set_project(p)
         bg = p.resolve(p.background_wav) if p else None
@@ -1009,8 +1031,10 @@ class MainWindow(QMainWindow):
             end = t_to if t_to is not None else float("inf")
             if replace:
                 p.lines = [ln for ln in p.lines if ln.end <= t_from or ln.start >= end]
+            from ..core.rythmo import words_to_fractions
             for sl in lines:
-                p.lines.append(Line(sl.start, sl.end, sl.text, None))
+                p.lines.append(Line(sl.start, sl.end, sl.text, None,
+                                    words=words_to_fractions(sl.start, sl.end, sl.words)))
             p.sort_lines()
             self.chars.reload()
             self.refresh_all()
@@ -1151,6 +1175,7 @@ class MainWindow(QMainWindow):
     def _on_line_edited(self, line_id: str, label: str = "Правка реплики"):
         self.lines_model.refresh_line(line_id)
         self.timeline.canvas.update()
+        self.rythmo.update()
         self._update_stats()
         self._update_now_line(self.player.position())
         self.mark_dirty(label)
