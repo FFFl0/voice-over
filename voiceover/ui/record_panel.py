@@ -62,6 +62,13 @@ class RecordPanel(QWidget):
         self.btn_refresh.setToolTip("Обновить список устройств")
         from .level_meter import LevelMeter
         self.level = LevelMeter()
+        self.btn_listen = QPushButton(theme.icon("headphones"), " Слышать себя")
+        self.btn_listen.setCheckable(True)
+        self.btn_listen.setToolTip("Слышать свой голос в наушниках с эффектом роли "
+                                   "(рация, телефон, эхо…). Только в наушниках — иначе свист. "
+                                   "Сдвиг тона и компрессор слышны только в сведении.")
+        self.btn_listen.toggled.connect(self._toggle_listen)
+        self._listen_warned = False
         self.preroll = QDoubleSpinBox()
         self.preroll.setRange(0, 10)
         self.preroll.setSuffix(" с")
@@ -161,7 +168,10 @@ class RecordPanel(QWidget):
         dev_row.addWidget(self.device, 1)
         dev_row.addWidget(self.btn_refresh)
         form.addRow("Микрофон:", dev_row)
-        form.addRow("Уровень:", self.level)
+        lvl_row = QHBoxLayout()
+        lvl_row.addWidget(self.level, 1)
+        lvl_row.addWidget(self.btn_listen)
+        form.addRow("Уровень:", lvl_row)
         # редко меняемые настройки — в сворачиваемом блоке
         self.opts_toggle = QToolButton()
         self.opts_toggle.setObjectName("optsToggle")
@@ -307,6 +317,8 @@ class RecordPanel(QWidget):
 
     def hideEvent(self, e):
         super().hideEvent(e)
+        if self.btn_listen.isChecked() and not (self.rec and self.rec.recording):
+            self.btn_listen.setChecked(False)   # ушли с вкладки — не оставлять микрофон в ушах
         if self.rec and not self.rec.recording:
             self.rec.close()
             self.rec = None
@@ -322,6 +334,11 @@ class RecordPanel(QWidget):
             return
         self.line = ln
         self.next_text = next_text
+        if self.btn_listen.isChecked() and self.rec is not None:   # эффект новой роли
+            try:
+                self.rec.set_monitor(self._live_fx())
+            except Exception:  # noqa: BLE001
+                pass
         self.lineChanged.emit(ln, next_text)
         if ln is None or not self.project:
             self.prompt.setText("Выберите реплику в таблице")
@@ -359,6 +376,7 @@ class RecordPanel(QWidget):
         self._load_edits()
         self.btn_rec.setEnabled(has_line or recording)
         self.btn_stop.setEnabled(recording)
+        self.btn_listen.setEnabled(not recording)
         self.btn_play.setEnabled(has_take and not recording)
         self.btn_del.setEnabled(has_take and not recording)
         self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
@@ -512,6 +530,30 @@ class RecordPanel(QWidget):
             QTimer.singleShot(900, self._loop_again)
         elif self.auto_next.isChecked() and self.auto_stop.isChecked():
             self.requestLine.emit(1)
+
+    def _live_fx(self):
+        from ..core.monitor import LiveFx
+        ch = self.project.character(self.line.character_id) if (self.project and self.line) else None
+        return LiveFx(ch.effect if ch else "", 48000)
+
+    def _toggle_listen(self, on: bool):
+        if on and not self._listen_warned:
+            self._listen_warned = True
+            if QMessageBox.question(
+                    self, "Слышать себя",
+                    "Свой голос будет звучать в наушниках с эффектом роли.\n"
+                    "Включайте только в наушниках: через колонки микрофон засвистит.\n\n"
+                    "Включить?") != QMessageBox.Yes:
+                self.btn_listen.setChecked(False)
+                return
+        try:
+            self._recorder().set_monitor(self._live_fx() if on else None)
+        except Exception as e:  # noqa: BLE001
+            self.btn_listen.blockSignals(True)
+            self.btn_listen.setChecked(False)
+            self.btn_listen.blockSignals(False)
+            if on:
+                QMessageBox.warning(self, "Слышать себя", f"Не удалось включить:\n{e}")
 
     def _rec_clicked(self):
         if self.is_recording():

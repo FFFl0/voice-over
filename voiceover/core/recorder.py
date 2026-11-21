@@ -56,20 +56,66 @@ class Recorder:
         self._running = False
         self.level = 0.0         # пиковый уровень 0..1 последнего блока
         self.frames = 0
+        self.monitor = None      # LiveFx — «слышать себя» в наушниках (None — выкл.)
+        self.monitor_volume = 1.0
 
     def _callback(self, indata, frames, time, status):  # noqa: ARG002
         self.level = float(np.abs(indata).max()) if frames else 0.0
         if self._running:
             self._q.put(indata.copy())
 
+    def _duplex_callback(self, indata, outdata, frames, time, status):  # noqa: ARG002
+        self._callback(indata, frames, time, status)
+        fx = self.monitor
+        if fx is None:
+            outdata.fill(0)
+            return
+        y = fx.process(indata[:, 0]) * self.monitor_volume
+        outdata[:] = y[:, None]
+
+    def _output_device(self):
+        """Выход того же звукового API, что и микрофон (иначе Windows не откроет поток)."""
+        import sounddevice as sd
+        try:
+            dev = self.device if self.device is not None else sd.default.device[0]
+            api = sd.query_devices(dev)["hostapi"]
+            out = sd.query_hostapis(api)["default_output_device"]
+            return out if out is not None and out >= 0 else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def start_monitor(self) -> None:
-        """Открыть поток только для индикатора уровня (без записи)."""
+        """Открыть поток: индикатор уровня, а при включённом «слышать себя» — и выход."""
         import sounddevice as sd
         if self._stream is None:
-            self._stream = sd.InputStream(device=self.device, channels=self.channels,
-                                          samplerate=self.sample_rate, dtype="float32",
-                                          callback=self._callback, blocksize=1024)
+            if self.monitor is not None:
+                self._stream = sd.Stream(device=(self.device, self._output_device()),
+                                         channels=(self.channels, 2), samplerate=self.sample_rate,
+                                         dtype="float32", callback=self._duplex_callback,
+                                         blocksize=256, latency="low")
+            else:
+                self._stream = sd.InputStream(device=self.device, channels=self.channels,
+                                              samplerate=self.sample_rate, dtype="float32",
+                                              callback=self._callback, blocksize=1024)
             self._stream.start()
+
+    def set_monitor(self, fx) -> None:
+        """Включить (LiveFx) или выключить (None) «слышать себя». Поток переоткрывается,
+        поэтому во время записи переключать нельзя."""
+        if self._running:
+            raise RuntimeError("Нельзя переключать во время записи")
+        if (fx is None) == (self.monitor is None):
+            self.monitor = fx      # тот же режим — просто сменить эффект
+            return
+        self._close_stream()
+        self.monitor = fx
+        try:
+            self.start_monitor()
+        except Exception:
+            self.monitor = None
+            self._close_stream()
+            self.start_monitor()
+            raise
 
     def start(self, path: str) -> None:
         self.start_monitor()
@@ -109,6 +155,9 @@ class Recorder:
     def close(self) -> None:
         if self._running:
             self.stop()
+        self._close_stream()
+
+    def _close_stream(self) -> None:
         if self._stream is not None:
             try:
                 self._stream.stop()
