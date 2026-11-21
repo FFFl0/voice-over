@@ -43,6 +43,7 @@ class AppSettings:
     nllb_size: str = "600M"
     deepl_key: str = ""
     recent: list[str] = field(default_factory=list)
+    hotkeys: dict = field(default_factory=dict)   # свои горячие клавиши: ключ → сочетание
 
     @classmethod
     def path(cls) -> Path:

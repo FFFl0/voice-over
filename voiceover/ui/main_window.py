@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self.resize(1560, 940)
         self._build_ui()
         self._build_actions()
+        self.apply_hotkeys()
         self._apply_icons()
         self._update_title()
         self._update_actions()
@@ -420,6 +421,9 @@ class MainWindow(QMainWindow):
         self.a_rythmo.toggled.connect(self._toggle_rythmo)
         self.addAction(self.a_rythmo)
         m.addAction(self.a_rythmo)
+        a_hk = QAction("Горячие клавиши…", self)
+        a_hk.triggered.connect(self.edit_hotkeys)
+        m.addAction(a_hk)
         m.addSeparator()
         grp = QActionGroup(self)
         self.theme_actions = {}
@@ -1792,30 +1796,73 @@ class MainWindow(QMainWindow):
             typing = isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox)) or \
                 (isinstance(fw, QComboBox) and fw.isEditable()) or \
                 (self.table.state() == QAbstractItemView.EditingState)
-            if not typing and not ev.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
-                key = ev.key()
-                if key == Qt.Key_Space:
-                    if self.record.is_recording() or self.record.loop_pending:
-                        self.record.stop_recording(manual=True)
-                    else:
-                        self.player.toggle()
-                    return True
-                if key == Qt.Key_R and self.tabs.currentWidget() is self.record:
+            if ev.isAutoRepeat() and ev.key() not in (Qt.Key_Left, Qt.Key_Right):
+                return False
+            mods = ev.modifiers() & ~Qt.KeypadModifier
+            if typing and not mods & (Qt.ControlModifier | Qt.AltModifier):
+                return False
+            if ev.key() in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta):
+                return False
+            seq = QKeySequence(mods.value | ev.key()).toString().lower()
+            action = self._single_keys.get(seq)
+            if action is None:
+                return False
+            recording = self.record.is_recording() or self.record.loop_pending
+            if action == "play":
+                if recording:
+                    self.record.stop_recording(manual=True)
+                else:
+                    self.player.toggle()
+            elif action == "record":
+                if recording:
+                    self.record.stop_recording(manual=True)
+                elif self.tabs.currentWidget() is self.record:
                     self.record.start_recording()
-                    return True
-                if key == Qt.Key_P:
-                    self.play_selected_clip()
-                    return True
-                if key == Qt.Key_N:
-                    self.add_line()
-                    return True
-                if key == Qt.Key_Delete and fw is self.table:
-                    self.delete_lines()
-                    return True
-                if key in (Qt.Key_Left, Qt.Key_Right) and fw is not self.table:
-                    self.player.seek(self.player.position() + (-2 if key == Qt.Key_Left else 2))
-                    return True
+                else:
+                    return False
+            elif action == "play_take":
+                self.play_selected_clip()
+            elif action == "new_line":
+                self.add_line()
+            elif action == "delete":
+                if fw is not self.table:
+                    return False
+                self.delete_lines()
+            elif action in ("back", "fwd"):
+                if fw is self.table and not mods:
+                    return False
+                self.player.seek(self.player.position() + (-2 if action == "back" else 2))
+            elif action in ("prev_line", "next_line"):
+                if recording:
+                    return False
+                self.record.requestLine.emit(-1 if action == "prev_line" else 1)
+            return True
         return False
+
+    # ------------------------------------------------------------ горячие клавиши
+    def apply_hotkeys(self):
+        from ..core.hotkeys import SINGLE, action_key
+        hk = self.settings.hotkeys
+        if not hasattr(self, "_default_shortcuts"):
+            self._default_shortcuts = {action_key(a.text()): a.shortcut().toString()
+                                       for a in self.findChildren(QAction) if a.text()}
+        for a in self.findChildren(QAction):
+            k = action_key(a.text())
+            if k in hk:
+                a.setShortcut(QKeySequence(hk[k]))
+            elif k in self._default_shortcuts:
+                a.setShortcut(QKeySequence(self._default_shortcuts[k]))
+        self._single_keys = {}
+        for k, (_t, default) in SINGLE.items():
+            seq = hk.get(k, default)
+            if seq:
+                self._single_keys[QKeySequence(seq).toString().lower()] = k
+
+    def edit_hotkeys(self):
+        from .hotkeys_dialog import HotkeysDialog
+        if HotkeysDialog(self).exec():
+            self.settings.save()
+            self.apply_hotkeys()
 
     def closeEvent(self, e):
         if self.task:
