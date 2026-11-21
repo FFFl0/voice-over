@@ -346,6 +346,10 @@ class MainWindow(QMainWindow):
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
         self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
+        self.a_split = act("Разрезать реплику по курсору", self.split_current, "Ctrl+K", None,
+                           "Разделить реплику в позиции курсора видео; запись делится вместе с ней")
+        self.a_merge = act("Склеить выделенные реплики", self.merge_selected, "Ctrl+J", None,
+                           "Объединить выделенные реплики одного персонажа в одну")
         self.a_backups = act("Восстановить из резервной копии…", self.restore_backup, None, None,
                              "Вернуть проект к одной из автоматических копий")
         self.a_stems = act("Экспорт по дорожкам (для Reaper)…", self.export_stems, None, None,
@@ -410,6 +414,9 @@ class MainWindow(QMainWindow):
         m = mb.addMenu("&Правка")
         m.addAction(self.a_undo)
         m.addAction(self.a_redo)
+        m.addSeparator()
+        m.addAction(self.a_split)
+        m.addAction(self.a_merge)
         m.addSeparator()
         m.addAction(self.a_backups)
         m.addAction(self.a_cleanup)
@@ -567,7 +574,8 @@ class MainWindow(QMainWindow):
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
                   self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems,
-                  self.a_diarize, self.a_script, self.a_backups):
+                  self.a_diarize, self.a_script, self.a_backups, self.a_split,
+                  self.a_merge):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -1423,6 +1431,9 @@ class MainWindow(QMainWindow):
         a.triggered.connect(lambda: text_tools.restore_original(self))
         a.setEnabled(any(ln.orig_text for ln in sel))
         m.addSeparator()
+        m.addAction(self.a_split)
+        m.addAction(self.a_merge)
+        m.addSeparator()
         a = m.addAction("Удалить")
         a.triggered.connect(self.delete_lines)
         a.setEnabled(bool(sel))
@@ -1529,6 +1540,45 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(0)
         self.text_edit.setFocus()
         self.mark_dirty("Новая реплика")
+
+    def split_current(self):
+        from ..core.edit_ops import split_line
+        p = self.project
+        if not p:
+            return
+        t = self.player.position()
+        ln = self.current_line()
+        if ln is None or not (ln.start < t < ln.end):
+            ln = next((x for x in p.lines if x.start < t < x.end), None)
+        if ln is None:
+            self.statusBar().showMessage("Поставьте курсор видео внутрь реплики, которую нужно "
+                                         "разрезать", 5000)
+            return
+        new = split_line(p, ln, t)
+        if new is None:
+            self.statusBar().showMessage("Слишком близко к краю реплики", 4000)
+            return
+        self.refresh_all()
+        self.select_line(new.id, seek=False)
+        self.mark_dirty("Разрезание реплики")
+        self.statusBar().showMessage("Реплика разрезана. Ctrl+Z — отменить.", 5000)
+
+    def merge_selected(self):
+        from ..core.edit_ops import merge_lines
+        p = self.project
+        if not p:
+            return
+        merged, warn = merge_lines(p, self.selected_lines())
+        if merged is None:
+            self.statusBar().showMessage(warn, 5000)
+            return
+        self.refresh_all()
+        self.select_line(merged.id, seek=False)
+        self.mark_dirty("Склейка реплик")
+        if warn:
+            QMessageBox.information(self, "Склейка реплик", warn)
+        else:
+            self.statusBar().showMessage("Реплики склеены. Ctrl+Z — отменить.", 5000)
 
     def delete_lines(self):
         lines = self.selected_lines()
