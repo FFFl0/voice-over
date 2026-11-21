@@ -141,6 +141,9 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
         ln = lines[i]
         if progress:
             progress(k / max(1, len(todo)), f"Подготовка реплик {k + 1}/{len(todo)}")
+        ch_id = ln.character_id if project.character(ln.character_id) else None
+        if not project.mix.role_audible(ch_id):
+            continue                       # роль заглушена (или включено соло другой роли)
         src, offset = clip_source(project, ln)
         if src is None:
             if ln.text.strip():

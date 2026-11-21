@@ -295,6 +295,7 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.lineActivated.connect(self._play_line_video)
         self.timeline.canvas.muteToggled.connect(self.toggle_track_mute)
         self.timeline.canvas.markerClicked.connect(self.edit_marker)
+        self.timeline.canvas.roleToggled.connect(self.toggle_role)
         self.timeline.canvas.markerAddRequested.connect(self.add_marker)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.timeline.canvas.lineEdited.connect(lambda i: self._on_line_edited(i, "Изменение тайминга"))
@@ -839,6 +840,20 @@ class MainWindow(QMainWindow):
         self.mark_dirty("Заглушение дорожки")
         self.preview_invalidate()
         self._mutes_changed()
+
+    def toggle_role(self, kind: str, key: str):
+        """Соло или заглушение роли — для прослушивания превью и экспорта."""
+        p = self.project
+        if not p:
+            return
+        lst = p.mix.solo_roles if kind == "solo" else p.mix.muted_roles
+        if key in lst:
+            lst.remove(key)
+        else:
+            lst.append(key)
+        self.timeline.canvas.update()
+        self.mark_dirty("Соло роли" if kind == "solo" else "Заглушение роли")
+        self.preview_invalidate()
 
     def _on_mix_changed(self):
         self._apply_track_mutes()
@@ -2038,6 +2053,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Экспорт", "Режим дубляжа: сначала выполните "
                                                      "«Обработка → Отделить голоса».")
                 return
+        silent = [c.name for c in p.characters if not p.mix.role_audible(c.id)]
+        if silent and QMessageBox.question(
+                self, "Экспорт",
+                "Не будут звучать роли (заглушены или включено соло других): "
+                + ", ".join(silent) + ".\nПродолжить?") != QMessageBox.Yes:
+            return
         shown = set(mixer.wave_keys(p)) & set(p.mix.muted)
         if shown:
             names = {"original": "оригинал", "vocals": "голоса оригинала", "background": "фон"}

@@ -33,6 +33,7 @@ class TimelineCanvas(QWidget):
     viewChanged = Signal()
     muteToggled = Signal(str)        # ключ дорожки звука: original / vocals / background
     markerClicked = Signal(str)      # id метки — изменить или удалить
+    roleToggled = Signal(str, str)   # ("solo" | "mute", id персонажа или "" — без роли)
     markerAddRequested = Signal(float)   # двойной клик по линейке — новая метка
 
     def __init__(self, parent=None):
@@ -399,12 +400,35 @@ class TimelineCanvas(QWidget):
                             th.paper if muted else th.muted, 16)
             ic.paint(p, mr.adjusted(5, 5, -5, -5).toRect())
         small = theme.body_font(theme.TEXT_SM - 1)
-        for i, (_, name, col, is_rec) in enumerate(lanes):
+        mix = self.project.mix if self.project else None
+        for i, (cid, name, col, is_rec) in enumerate(lanes):
             y = self.lanes_top + i * LANE_H
+            key = cid or ""
+            audible = mix.role_audible(cid) if mix else True
+            if not audible:   # заглушённая роль — дорожка притушена
+                shade = QColor(th.paper)
+                shade.setAlpha(150)
+                p.fillRect(QRectF(LABEL_W, y, w - LABEL_W, LANE_H), shade)
             p.fillRect(QRectF(0, y, 4, LANE_H), col)          # ключ цвета роли
+            # кнопки соло и заглушения
+            for kind, r in (("solo", self.role_btn_rect(i, "solo")),
+                            ("mute", self.role_btn_rect(i, "mute"))):
+                on = bool(mix) and key in (mix.solo_roles if kind == "solo" else mix.muted_roles)
+                p.setRenderHint(QPainter.Antialiasing, True)
+                if on:
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(QColor(th.warn if kind == "solo" else th.error))
+                else:
+                    p.setPen(QPen(QColor(th.border), 1))
+                    p.setBrush(Qt.NoBrush)
+                p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
+                p.setRenderHint(QPainter.Antialiasing, False)
+                p.setFont(theme.body_font(theme.TEXT_SM - 1, QFont.Bold))
+                p.setPen(QColor(th.paper) if on else QColor(th.muted))
+                p.drawText(r, Qt.AlignCenter, "S" if kind == "solo" else "M")
             p.setFont(theme.body_font(theme.TEXT_SM, QFont.Medium))
-            p.setPen(QColor(th.ink))
-            name_w = LABEL_W - 22 - (44 if is_rec else 0)
+            p.setPen(QColor(th.ink) if audible else QColor(th.muted))
+            name_w = LABEL_W - 22 - 46 - (44 if is_rec else 0)
             p.drawText(QRectF(14, y, name_w, LANE_H), Qt.AlignVCenter,
                        p.fontMetrics().elidedText(name, Qt.ElideRight, name_w))
             if is_rec:
@@ -473,6 +497,10 @@ class TimelineCanvas(QWidget):
         if mk is not None:
             self.markerClicked.emit(mk["id"])
             return
+        rb = self.role_btn_at(pos)
+        if rb is not None:
+            self.roleToggled.emit(*rb)
+            return
         if pos.y() < self.lanes_top or pos.x() < LABEL_W:
             self.seekRequested.emit(max(0.0, self.t_of(max(LABEL_W, pos.x()))))
             self._drag = ("seek",)
@@ -500,6 +528,12 @@ class TimelineCanvas(QWidget):
                 self.update()
             self.setCursor(Qt.SizeHorCursor if part in ("left", "right") else
                            (Qt.PointingHandCursor if ln else Qt.ArrowCursor))
+            rb = self.role_btn_at(pos)
+            if rb is not None:
+                self.setCursor(Qt.PointingHandCursor)
+                self.setToolTip("Соло: слышна только эта роль (можно включить у нескольких)"
+                                if rb[0] == "solo" else "Заглушить роль в превью и экспорте")
+                return
             mk = self.marker_at(pos)
             if mk is not None:
                 from html import escape
@@ -601,6 +635,23 @@ class TimelineCanvas(QWidget):
             ln.end = round(ln.end, 3)
             self.lineEdited.emit(ln.id)
         self._drag = None
+
+    def role_btn_rect(self, lane: int, kind: str) -> QRectF:
+        y = self.lanes_top + lane * LANE_H + (LANE_H - 20) / 2
+        x = LABEL_W - 50 if kind == "solo" else LABEL_W - 27
+        return QRectF(x, y, 20, 20)
+
+    def role_btn_at(self, pos: QPointF):
+        if pos.x() >= LABEL_W or pos.y() < self.lanes_top:
+            return None
+        lanes = self.lanes()
+        i = int((pos.y() - self.lanes_top) // LANE_H)
+        if not 0 <= i < len(lanes):
+            return None
+        for kind in ("solo", "mute"):
+            if self.role_btn_rect(i, kind).adjusted(-2, -2, 2, 2).contains(pos):
+                return kind, lanes[i][0] or ""
+        return None
 
     def marker_at(self, pos: QPointF):
         if not self.project or pos.y() > RULER_H:

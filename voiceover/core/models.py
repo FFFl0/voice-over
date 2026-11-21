@@ -107,6 +107,15 @@ class MixSettings:
     dub_only_lines: bool = True
     # заглушённые дорожки звука (кнопки на таймлайне): original / vocals / background
     muted: list = field(default_factory=list)
+    # роли: заглушённые и «соло» (если есть соло — звучат только они); "" — реплики без роли
+    muted_roles: list = field(default_factory=list)
+    solo_roles: list = field(default_factory=list)
+
+    def role_audible(self, cid) -> bool:
+        key = cid or ""
+        if self.solo_roles:
+            return key in self.solo_roles
+        return key not in self.muted_roles
     sample_rate: int = 48000
 
     def to_dict(self) -> dict:
