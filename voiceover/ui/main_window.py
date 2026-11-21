@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self.resize(1560, 940)
         self._build_ui()
         self.actor_win = None   # окно актёра (Ctrl+Shift+A)
+        self._extents: dict = {}   # где звучала реплика при сборке превью
         self._build_actions()
         self.apply_hotkeys()
         self._apply_icons()
@@ -657,6 +658,7 @@ class MainWindow(QMainWindow):
             self._restoring = False
         self.dirty = True
         self._update_title()
+        self.preview_invalidate()
         self._update_undo_actions()
         self.statusBar().showMessage(("Отменено: " if undo else "Повторено: ") + label, 4000)
 
@@ -831,11 +833,13 @@ class MainWindow(QMainWindow):
         p.mix.muted = sorted(muted)
         self._apply_track_mutes()
         self.mark_dirty("Заглушение дорожки")
+        self.preview_invalidate()
         self._mutes_changed()
 
     def _on_mix_changed(self):
         self._apply_track_mutes()
         self.mark_dirty("Настройки сведения")
+        self.preview_invalidate()
 
     def _mutes_changed(self):
         if self.timeline.canvas.preview_range:
@@ -1477,6 +1481,7 @@ class MainWindow(QMainWindow):
 
     def _on_line_edited(self, line_id: str, label: str = "Правка реплики"):
         self._refresh_chars_progress()
+        self.preview_invalidate(line_id)
         self.lines_model.refresh_line(line_id)
         self.timeline.canvas.update()
         self.rythmo.update()
@@ -1633,6 +1638,7 @@ class MainWindow(QMainWindow):
         self.refresh_all()
         self.select_line(new.id, seek=False)
         self.mark_dirty("Разрезание реплики")
+        self.preview_invalidate()
         self.statusBar().showMessage("Реплика разрезана. Ctrl+Z — отменить.", 5000)
 
     def merge_selected(self):
@@ -1647,6 +1653,7 @@ class MainWindow(QMainWindow):
         self.refresh_all()
         self.select_line(merged.id, seek=False)
         self.mark_dirty("Склейка реплик")
+        self.preview_invalidate()
         if warn:
             QMessageBox.information(self, "Склейка реплик", warn)
         else:
@@ -1660,6 +1667,7 @@ class MainWindow(QMainWindow):
         self.project.lines = [ln for ln in self.project.lines if ln.id not in ids]
         self.refresh_all()
         self.mark_dirty(f"Удаление реплик ({len(ids)})")
+        self.preview_invalidate()
         self.statusBar().showMessage(f"Удалено реплик: {len(ids)}. Ctrl+Z — вернуть.", 5000)
 
     def _step_line(self, delta: int):
@@ -1816,6 +1824,125 @@ class MainWindow(QMainWindow):
             return
         self.run_task(Task("Отделение голосов", work), done)
 
+    # ------------------------------------------------------------ живое превью
+    PREVIEW_FULL_LIMIT = 180.0   # короче — после крупных правок превью пересобирается целиком
+
+    def _clip_extent(self, ln) -> tuple[float, float]:
+        """Где звучит реплика в фильме (сама реплика и её запись с учётом обрезки)."""
+        a, b = ln.start, ln.end
+        src = self.project.resolve(ln.rec_path) if ln.rec_path else None
+        if src is not None:
+            try:
+                import soundfile as sf
+                dur = sf.info(str(src)).duration
+                t0 = ln.start + ln.rec_offset
+                a, b = min(a, t0 + ln.trim_in), max(b, t0 + dur - ln.trim_out)
+            except Exception:  # noqa: BLE001
+                pass
+        return a, b
+
+    def _remember_extents(self):
+        rng = self.timeline.canvas.preview_range
+        self._extents = {}
+        if not self.project or not rng:
+            return
+        for ln in self.project.lines:
+            if ln.end >= rng[0] - 10 and ln.start <= rng[1] + 10:
+                self._extents[ln.id] = self._clip_extent(ln)
+
+    def preview_invalidate(self, line_id: Optional[str] = None):
+        """Превью собрано заранее; после правки пересобираем изменившийся кусок и
+        подменяем его в файле — новое звучание слышно сразу, без F6."""
+        p = self.project
+        rng = self.timeline.canvas.preview_range
+        if not p or not rng:
+            return
+        if line_id is not None:
+            ln = next((x for x in p.lines if x.id == line_id), None)
+            if ln is None:
+                return
+            new = self._clip_extent(ln)
+            old = getattr(self, "_extents", {}).get(line_id, (new[0] - 3, new[1] + 3))
+            self._extents[line_id] = new
+            region = (min(old[0], new[0]) - 1.0, max(old[1], new[1]) + 1.0)
+        elif rng[1] - rng[0] <= self.PREVIEW_FULL_LIMIT:
+            region = rng
+        else:
+            self._remember_extents()
+            self.statusBar().showMessage("Превью устарело — пересоберите его (F6)", 6000)
+            return
+        a, b = max(rng[0], region[0]), min(rng[1], region[1])
+        if b <= a:
+            return
+        pend = getattr(self, "_patch_region", None)
+        self._patch_region = (min(a, pend[0]), max(b, pend[1])) if pend else (a, b)
+        if not hasattr(self, "_patch_timer"):
+            self._patch_timer = QTimer(self, singleShot=True, interval=400,
+                                       timeout=self._patch_preview)
+        self._patch_timer.start()
+
+    def _patch_preview(self):
+        p = self.project
+        rng = self.timeline.canvas.preview_range
+        region = getattr(self, "_patch_region", None)
+        if not p or not rng or not region:
+            return
+        if getattr(self, "_patching", False) or self.task is not None:
+            self._patch_timer.start()          # дождаться текущей сборки
+            return
+        self._patch_region = None
+        self._patching = True
+        a, b = region
+        tmp = str(p.project_dir / "preview_patch.wav")
+        snap = Project.from_dict(p.to_dict())   # копия: сведение идёт в фоне
+        snap.path = p.path
+
+        def work(t: Task):
+            mixer.render_project(snap, tmp, None, t.is_cancelled, a, b)
+            return tmp
+
+        def done(path):
+            self._patching = False
+            self._splice_preview(path, a, rng)
+
+        def failed(msg):
+            self._patching = False
+            self.statusBar().showMessage(f"Не удалось обновить превью: {msg}", 6000)
+
+        task = Task("Обновление превью", work)
+        task.signals.result.connect(done)
+        task.signals.error.connect(failed)
+        self._patch_task = task
+        pool().start(task)
+
+    def _splice_preview(self, patch: str, a: float, rng: tuple[float, float]):
+        import soundfile as sf
+        p = self.project
+        if not p or self.timeline.canvas.preview_range != rng:
+            return                                  # превью уже пересобрали заново
+        out = str(p.project_dir / "preview.wav")
+        playing = self.player.is_playing()
+        self.player.dub.stop()
+        self.player.dub.setSource(QUrl())           # Windows не даст писать в открытый файл
+        try:
+            data, sr = sf.read(patch, dtype="float32", always_2d=True)
+            with sf.SoundFile(out, "r+") as f:
+                pos = int(round((a - rng[0]) * f.samplerate))
+                if 0 <= pos < f.frames:
+                    f.seek(pos)
+                    f.write(data[: f.frames - pos])
+        except Exception as e:  # noqa: BLE001
+            self.statusBar().showMessage(f"Не удалось обновить превью: {e}", 6000)
+        finally:
+            Path(patch).unlink(missing_ok=True)
+            mode = self.player.sound.currentIndex()
+            self.player.set_preview(out, rng[0], rng[1] - rng[0])
+            self.player.sound.setCurrentIndex(mode)
+            if playing:
+                self.player.play()
+            self.player._sync_dub(force=True)
+        self.statusBar().showMessage("Превью обновлено", 2000)
+
     def build_preview(self, seconds: Optional[float], rng: Optional[tuple[float, float]] = None,
                       autoplay: bool = False):
         p = self.project
@@ -1838,6 +1965,7 @@ class MainWindow(QMainWindow):
             length = sf.info(out).duration
             self.player.set_preview(out, rng[0], length)
             self.timeline.canvas.preview_range = (rng[0], rng[0] + length)
+            self._remember_extents()
             self.statusBar().showMessage(
                 f"Превью {fmt_clock(rng[0])}–{fmt_clock(rng[0] + length)} готово. "
                 f"Звук плеера переключён на озвучку.", 8000)
