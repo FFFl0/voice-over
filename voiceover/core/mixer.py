@@ -287,8 +287,9 @@ def background_path(project: Project) -> Optional[Path]:
 def render_mix(project: Project, clips: list[Clip], out_wav: str,
                progress: Optional[ProgressCb] = None, cancel: Optional[CancelCb] = None,
                t_from: float = 0.0, t_to: Optional[float] = None,
-               include_background: bool = True) -> None:
-    """Потоковое сведение: фон (оригинал с приглушением или фон без голосов) + голоса."""
+               include_background: bool = True, include_voices: bool = True) -> None:
+    """Потоковое сведение: фон (оригинал с приглушением или фон без голосов) + голоса.
+    include_voices=False — только фон (с приглушением под репликами), для экспорта дорожек."""
     sr = project.mix.sample_rate
     mix = project.mix
     bg_file: Optional[sf.SoundFile] = None
@@ -379,7 +380,7 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
                                             mix.duck_attack, mix.duck_release)
                         bg *= (1.0 - env * (1.0 - duck_lin))[:, None]
                     buf[: len(bg)] += bg
-                for c in clips:
+                for c in (clips if include_voices else ()):
                     cs = int(round(c.start * sr))
                     ce = cs + c.length
                     if ce <= pos or cs >= pos + n:

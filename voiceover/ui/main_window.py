@@ -336,6 +336,8 @@ class MainWindow(QMainWindow):
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
         self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
+        self.a_stems = act("Экспорт по дорожкам (для Reaper)…", self.export_stems, None, None,
+                           "Голоса каждого персонажа, фон и микс отдельными WAV + проект Reaper")
         self.a_pkg_export = act("Пакет для актёра…", lambda: team_tools.export_package(self),
                                 tip="Проект и сценарий ролей для записи на удалёнке")
         self.a_pkg_open = act("Открыть пакет актёра…", lambda: team_tools.open_package(self))
@@ -370,7 +372,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_save, self.a_save_as, self.a_close):
             m.addAction(a)
         m.addSeparator()
-        for a in (self.a_import, self.a_export_srt, self.a_export):
+        for a in (self.a_import, self.a_export_srt, self.a_export, self.a_stems):
             m.addAction(a)
         m.addSeparator()
         tm = m.addMenu("Актёры на удалёнке")
@@ -534,7 +536,7 @@ class MainWindow(QMainWindow):
                   self.a_export_srt, self.a_preview,
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
-                  self.a_rec_send, self.a_rec_import, self.a_align):
+                  self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -1107,6 +1109,33 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
+    def export_stems(self):
+        p = self.project
+        if not p:
+            return
+        start = str(Path(p.path).parent) if p.path else ""
+        d = QFileDialog.getExistingDirectory(self, "Папка для дорожек", start)
+        if not d:
+            return
+        stem = Path(p.path).stem if p.path else "проект"
+        out = Path(d) / f"{stem} — дорожки"
+        if out.exists() and any(out.iterdir()) and QMessageBox.question(
+                self, "Экспорт по дорожкам",
+                f"Папка «{out.name}» уже есть. Перезаписать файлы в ней?") != QMessageBox.Yes:
+            return
+        from ..core.stems import export_stems
+
+        def work(t: Task):
+            return export_stems(p, str(out), t.report, t.is_cancelled)
+
+        def done(files):
+            QMessageBox.information(
+                self, "Экспорт по дорожкам",
+                f"Готово: {len(files)} файлов в папке\n{out}\n\nОткройте «Озвучка.RPP» в Reaper: "
+                "фон и микс — целиком, реплики — отдельными клипами на дорожках персонажей.")
+
+        self.run_task(Task("Экспорт по дорожкам", work), done)
+
     def align_recordings(self, ids: Optional[list[str]] = None, quiet: bool = True):
         """Подогнать сдвиг записей к голосу оригинала (выделенные реплики или ids)."""
         from ..core.align import align_line, reference_path
@@ -1630,8 +1659,8 @@ class MainWindow(QMainWindow):
             if not typing and not ev.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
                 key = ev.key()
                 if key == Qt.Key_Space:
-                    if self.record.is_recording():
-                        self.record.stop_recording()
+                    if self.record.is_recording() or self.record.loop_pending:
+                        self.record.stop_recording(manual=True)
                     else:
                         self.player.toggle()
                     return True

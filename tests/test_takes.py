@@ -71,3 +71,51 @@ def test_record_panel_take_box(tmp_path):
     assert ln.rec_path.endswith("_1.wav") and got == [ln.id]
     assert abs(panel.offset.value() - 0.1) < 1e-9
     del app
+
+
+def test_loop_recording_flow(tmp_path, monkeypatch):
+    """По кругу: после автостопа запись той же реплики начинается снова; «Стоп» в паузе
+    между дублями заканчивает круг."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from voiceover.core.settings import AppSettings
+    from voiceover.ui import record_panel as rp
+    from voiceover.ui.video_player import VideoPlayer
+
+    class FakeRec:
+        recording = False
+        level = 0.0
+
+        def start(self, path):
+            self.recording = True
+            sf.write(path, np.full(4800, 0.3, np.float32), 48000)
+
+        def stop(self):
+            self.recording = False
+
+        def close(self):
+            pass
+
+    p, ln = make(tmp_path, n=1)
+    panel = rp.RecordPanel(VideoPlayer(), AppSettings())
+    panel.setEnabled(True)
+    fake = FakeRec()
+    panel.rec = fake
+    monkeypatch.setattr(panel, "_recorder", lambda: fake)
+    monkeypatch.setattr(panel, "isVisible", lambda: True)
+    panel.auto_align.setChecked(False)
+    panel.loop.setChecked(True)
+    panel.set_project(p)
+    panel.set_line(ln)
+    panel.start_recording()
+    assert panel.is_recording()
+    panel.stop_recording()                     # автостоп
+    assert panel.loop_pending and not panel.is_recording()
+    panel._loop_again()                        # таймер паузы
+    assert panel.is_recording() and len(list_takes(p, ln)) == 3
+    panel.stop_recording()
+    panel.stop_recording(manual=True)          # «Стоп» в паузе
+    assert not panel.loop_pending
+    panel._loop_again()
+    assert not panel.is_recording()
+    del app

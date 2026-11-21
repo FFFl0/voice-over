@@ -36,6 +36,7 @@ class RecordPanel(QWidget):
         self.rec: Optional[Recorder] = None
         self._rec_path = ""
         self._rec_t0 = 0.0
+        self.loop_pending = False   # пауза между дублями при записи по кругу
         self._get_neighbors: Optional[Callable[[], tuple[str, str]]] = None
 
         self.device = QComboBox()
@@ -56,6 +57,9 @@ class RecordPanel(QWidget):
         self.auto_stop.setChecked(True)
         self.auto_next = QCheckBox("Затем к следующей реплике")
         self.auto_next.setChecked(True)
+        self.loop = QCheckBox("По кругу: дубль за дублем")
+        self.loop.setToolTip("После каждого дубля запись той же реплики начинается снова. "
+                             "Остановите кнопкой «Стоп» и выберите лучший дубль в списке.")
         self.mute_video = QCheckBox("Без звука видео при записи")
         self.mute_video.setToolTip("Включите, если пишете без наушников, чтобы оригинал не попал в микрофон")
 
@@ -146,6 +150,7 @@ class RecordPanel(QWidget):
         opts = QHBoxLayout()
         opts.addWidget(self.auto_stop)
         opts.addWidget(self.auto_next)
+        opts.addWidget(self.loop)
         form.addRow(opts)
         form.addRow(self.mute_video)
         form.addRow(self.auto_align)
@@ -203,7 +208,7 @@ class RecordPanel(QWidget):
         self.btn_refresh.clicked.connect(self.refresh_devices)
         self.device.currentIndexChanged.connect(self._device_changed)
         self.btn_rec.clicked.connect(self.start_recording)
-        self.btn_stop.clicked.connect(self.stop_recording)
+        self.btn_stop.clicked.connect(lambda: self.stop_recording(manual=True))
         self.btn_play.clicked.connect(self._play_take)
         self.btn_del.clicked.connect(self._delete_take)
         self.btn_prev.clicked.connect(lambda: self.requestLine.emit(-1))
@@ -398,7 +403,11 @@ class RecordPanel(QWidget):
         self.timer.start()
         self._update_buttons()
 
-    def stop_recording(self):
+    def stop_recording(self, manual: bool = False):
+        if manual and self.loop_pending:   # «Стоп» в паузе между дублями — круг окончен
+            self.loop_pending = False
+            self.countdown.setText("")
+            return
         if not self.rec or not self.rec.recording:
             return
         self.rec.stop()
@@ -430,8 +439,20 @@ class RecordPanel(QWidget):
         self.recorded.emit(ln.id)
         if self.auto_align.isChecked():
             self.alignRequested.emit(ln.id)
-        if self.auto_next.isChecked() and self.auto_stop.isChecked():
+        if self.loop.isChecked() and not manual:
+            self.countdown.setText("Следующий дубль…")
+            self.loop_pending = True
+            QTimer.singleShot(900, self._loop_again)
+        elif self.auto_next.isChecked() and self.auto_stop.isChecked():
             self.requestLine.emit(1)
+
+    def _loop_again(self):
+        if not self.loop_pending:
+            return
+        self.loop_pending = False
+        if self.loop.isChecked() and self.line is not None and not self.is_recording() \
+                and self.isVisible():
+            self.start_recording()
 
     def _tick(self):
         if self.rec:
@@ -454,7 +475,8 @@ class RecordPanel(QWidget):
             self.meter.setValue(1000)
             self.countdown.setText("Запись идёт, можно остановить")
             self.countdown.setStyleSheet(f"color:{th.muted}")
-        if self.auto_stop.isChecked() and t > self.line.end + self.settings.record_postroll:
+        if (self.auto_stop.isChecked() or self.loop.isChecked()) and \
+                t > self.line.end + self.settings.record_postroll:
             self.stop_recording()
         # страховка, если видео не загружено
         if time.monotonic() - self._rec_t0 > max(60.0, self.line.duration + 30):
