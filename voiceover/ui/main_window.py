@@ -316,6 +316,7 @@ class MainWindow(QMainWindow):
         from .cue import CueOverlay
         self.cue_overlay = CueOverlay(self.player.video, self)
         self.record.cueState.connect(self.cue_overlay.set_state)
+        self.record.abRequested.connect(lambda: self.compare_ab(self.record.line))
         self.record.reviewRequested.connect(lambda k: self.set_review(k, [self.record.line]
                                                                       if self.record.line else None))
         self.record.alignRequested.connect(lambda i: self.align_recordings([i], quiet=False))
@@ -1700,6 +1701,29 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.ensure_visible(m["t"], m["t"])
         self.statusBar().showMessage(f"Метка {fmt_clock(m['t'])}: {m['text']}", 6000)
 
+    def compare_ab(self, ln=None):
+        """A/B: голос оригинала под репликой, пауза, затем дубль (как в сведении)."""
+        from ..core.ab import build_ab
+        p = self.project
+        ln = ln or (self.record.line if self.tabs.currentWidget() is self.record else None) \
+            or self.current_line()
+        if not p or ln is None or not ln.rec_path:
+            self.statusBar().showMessage("Выберите реплику с записью", 4000)
+            return
+        out = p.project_dir / "cache" / "ab.wav"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        self.clip_player.stop()
+        self.clip_player.setSource(QUrl())     # освободить прошлый файл
+        try:
+            ta, tb = build_ab(p, ln, str(out))
+        except Exception as e:  # noqa: BLE001
+            self.statusBar().showMessage(f"A/B: {e}", 5000)
+            return
+        self.player.pause()
+        self.play_file(str(out))
+        self.statusBar().showMessage(f"A — оригинал ({ta:.1f} с), пауза, B — ваш дубль ({tb:.1f} с)",
+                                     max(4000, int((ta + tb + 1) * 1000)))
+
     def set_review(self, kind: str, lines: Optional[list] = None):
         """Отметка режиссёра: 'ok' — одобрено, 'redo' — переписать (с комментарием), '' — снять."""
         p = self.project
@@ -2254,6 +2278,8 @@ class MainWindow(QMainWindow):
                 if fw is self.table and not mods:
                     return False
                 self.player.seek(self.player.position() + (-2 if action == "back" else 2))
+            elif action == "ab":
+                self.compare_ab()
             elif action in ("approve", "redo"):
                 self.set_review("ok" if action == "approve" else "redo")
             elif action == "marker":

@@ -41,6 +41,7 @@ class RecordPanel(QWidget):
     playTake = Signal(str)            # путь к файлу дубля
     alignRequested = Signal(str)      # id реплики: подогнать запись к оригиналу
     lineChanged = Signal(object, str)      # реплика (или None) и текст следующей — окну актёра
+    abRequested = Signal()                 # сравнить оригинал и дубль
     reviewRequested = Signal(str)          # "ok" | "redo" — отметка режиссёра
     cueState = Signal(str, float, float)   # режим отсчёта, секунд до реплики, прошло (cue.py)
 
@@ -127,6 +128,9 @@ class RecordPanel(QWidget):
         self.btn_stop = QPushButton(theme.icon("stop"), " Стоп")
         self.btn_play = QPushButton(theme.icon("headphones"), " Дубль")
         self.btn_play.setToolTip("Прослушать запись вместе с видео")
+        self.btn_ab = QPushButton("A/B")
+        self.btn_ab.setToolTip("Сравнить: сначала голос оригинала, затем ваш дубль (B)")
+        self.btn_ab.clicked.connect(self.abRequested.emit)
         self.btn_del = QPushButton(theme.icon("trash"), "")
         self.btn_del.setToolTip("Удалить выбранный дубль с диска")
         self.btn_prev = QPushButton(theme.icon("back"), "")
@@ -212,7 +216,8 @@ class RecordPanel(QWidget):
         self._toggle_opts(settings.record_opts_open)
 
         btns = QHBoxLayout()
-        for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_next):
+        for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_ab,
+                  self.btn_next):
             b.setMinimumHeight(40)
             btns.addWidget(b, 2 if b is self.btn_rec else 1)
         take = QHBoxLayout()
@@ -392,6 +397,7 @@ class RecordPanel(QWidget):
         self.btn_stop.setEnabled(recording)
         self.btn_listen.setEnabled(not recording)
         self.btn_play.setEnabled(has_take and not recording)
+        self.btn_ab.setEnabled(has_take and not recording)
         self.btn_del.setEnabled(has_take and not recording)
         self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
         self.offset.setEnabled(has_take and not recording)
