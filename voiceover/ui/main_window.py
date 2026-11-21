@@ -347,6 +347,8 @@ class MainWindow(QMainWindow):
         self.a_pkg_open = act("Открыть пакет актёра…", lambda: team_tools.open_package(self))
         self.a_rec_send = act("Отправить записи…", lambda: team_tools.send_recordings(self),
                               tip="Записи ваших ролей в zip для режиссёра")
+        self.a_script = act("Сценарий для актёров (PDF)…", lambda: team_tools.export_script(self),
+                            None, None, "Реплики каждой роли с таймкодами и заметками, сводка по ролям")
         self.a_rec_import = act("Загрузить записи актёров…",
                                 lambda: team_tools.import_recordings(self))
         self.a_quit = act("Выход", self.close, "Ctrl+Q")
@@ -378,7 +380,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_save, self.a_save_as, self.a_close):
             m.addAction(a)
         m.addSeparator()
-        for a in (self.a_import, self.a_export_srt, self.a_export, self.a_stems):
+        for a in (self.a_import, self.a_export_srt, self.a_export, self.a_stems, self.a_script):
             m.addAction(a)
         m.addSeparator()
         tm = m.addMenu("Актёры на удалёнке")
@@ -544,7 +546,7 @@ class MainWindow(QMainWindow):
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
                   self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems,
-                  self.a_diarize):
+                  self.a_diarize, self.a_script):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)

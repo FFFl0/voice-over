@@ -167,3 +167,45 @@ def import_recordings(win) -> None:
     msg += errors
     (QMessageBox.warning if errors else QMessageBox.information)(
         win, "Записи актёров", "\n\n".join(msg))
+
+
+def export_script(win) -> None:
+    """Сценарий для актёров в PDF или HTML."""
+    from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter, QTextDocument
+    from PySide6.QtCore import QMarginsF
+    from ..core.script import build_html
+    p = win.project
+    if not p or not p.characters:
+        QMessageBox.information(win, "Сценарий", "В проекте нет персонажей.")
+        return
+    cids = choose_characters(win, "Сценарий для актёров",
+                             "Чьи реплики включить в сценарий?", {c.id for c in p.characters})
+    if not cids:
+        return
+    stem = Path(p.path).stem if p.path else "проект"
+    path, flt = QFileDialog.getSaveFileName(
+        win, "Сохранить сценарий", str(Path(_base_dir(win)) / f"{stem} — сценарий.pdf"),
+        "PDF (*.pdf);;Веб-страница (*.html)")
+    if not path:
+        return
+    doc_html = build_html(p, cids)
+    try:
+        if path.lower().endswith(".html") or "html" in flt:
+            if not path.lower().endswith(".html"):
+                path += ".html"
+            Path(path).write_text(doc_html, encoding="utf-8")
+        else:
+            if not path.lower().endswith(".pdf"):
+                path += ".pdf"
+            w = QPdfWriter(path)
+            w.setPageLayout(QPageLayout(QPageSize(QPageSize.A4), QPageLayout.Portrait,
+                                        QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter))
+            w.setResolution(150)
+            w.setTitle(f"{stem} — сценарий")
+            doc = QTextDocument()
+            doc.setHtml(doc_html)
+            doc.print_(w)
+    except Exception as e:  # noqa: BLE001
+        QMessageBox.critical(win, "Сценарий", f"Не удалось сохранить:\n{e}")
+        return
+    win.statusBar().showMessage(f"Сценарий сохранён: {path}", 8000)
