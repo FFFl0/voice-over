@@ -52,7 +52,7 @@ class CharacterRowDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         from PySide6.QtCore import QSize
-        return QSize(option.rect.width(), 40)
+        return QSize(option.rect.width(), 46)
 
     def paint(self, p, option, index):
         from PySide6.QtCore import QRectF
@@ -76,6 +76,14 @@ class CharacterRowDelegate(QStyledItemDelegate):
                    index.data(Qt.UserRole + 2) or "")
         p.drawText(QRectF(r.right() - 125, r.top(), 115, r.height()), Qt.AlignVCenter | Qt.AlignLeft,
                    p.fontMetrics().elidedText(index.data(Qt.UserRole + 3) or "", Qt.ElideRight, 115))
+        # полоска прогресса записи роли
+        frac = float(index.data(Qt.UserRole + 4) or 0.0)
+        track = QRectF(r.left() + 16, r.bottom() - 7, max(10.0, r.width() - 26), 3)
+        p.fillRect(track, QColor(th.rule))
+        if frac > 0:
+            fill = QRectF(track)
+            fill.setWidth(track.width() * min(1.0, frac))
+            p.fillRect(fill, QColor(th.success) if frac >= 1 else QColor(index.data(Qt.UserRole + 1)))
         p.restore()
 
 
@@ -197,6 +205,7 @@ class CharactersPanel(QWidget):
                 it.setData(Qt.UserRole + 1, c.color)
                 it.setData(Qt.UserRole + 2, f"записано {recorded.get(c.id, 0)} из {n}")
                 it.setData(Qt.UserRole + 3, c.actor or "актёр не указан")
+                it.setData(Qt.UserRole + 4, recorded.get(c.id, 0) / n if n else 0.0)
                 it.setData(Qt.UserRole, c.id)
                 self.list.addItem(it)
         self.list.blockSignals(False)

@@ -293,6 +293,7 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.lineSelected.connect(self._select_line_from_timeline)
         self.timeline.canvas.lineActivated.connect(self._play_line_video)
         self.timeline.canvas.muteToggled.connect(self.toggle_track_mute)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self.timeline.canvas.lineEdited.connect(lambda i: self._on_line_edited(i, "Изменение тайминга"))
         self.table.selectionModel().selectionChanged.connect(self._on_table_selection)
         self.lines_model.edited.connect(lambda i: self._on_line_edited(i, "Правка реплики"))
@@ -554,7 +555,9 @@ class MainWindow(QMainWindow):
         name = Path(self.project.path).stem if self.project and self.project.path else \
             ("без имени" if self.project else "")
         star = " •" if self.dirty else ""
-        self.setWindowTitle(f"{name}{star} — {APP_NAME}" if name else APP_NAME)
+        prog = getattr(self, "_progress", None)
+        prog_s = f" — записано {prog:.0%}" if (self.project and prog is not None) else ""
+        self.setWindowTitle(f"{name}{star}{prog_s} — {APP_NAME}" if name else APP_NAME)
 
     def _update_actions(self):
         has = self.project is not None
@@ -652,6 +655,9 @@ class MainWindow(QMainWindow):
         total = len(self.project.lines)
         ready = counts.get("rec", 0)
         self.stat_labels["ready"].setText(f"{ready} из {total}")
+        todo = sum(1 for ln in self.project.lines if ln.enabled and ln.text.strip())
+        self._progress = ready / todo if todo else None
+        self._update_title()
         for key in ("none", "nochar"):
             self.stat_labels[key].setText(str(counts.get(key, 0)))
         th = theme.current()
@@ -1436,7 +1442,21 @@ class MainWindow(QMainWindow):
     def _select_line_from_timeline(self, line_id: str):
         self.select_line(line_id, seek=False)
 
+    def _refresh_chars_progress(self):
+        """Счётчики и полоски прогресса ролей: сразу, если вкладка видна, иначе — при открытии."""
+        if self.tabs.currentWidget() is self.chars:
+            cur = self.chars.current()
+            self.chars.reload(cur.id if cur else None)
+            self._chars_stale = False
+        else:
+            self._chars_stale = True
+
+    def _on_tab_changed(self, _i):
+        if self.tabs.currentWidget() is self.chars and getattr(self, "_chars_stale", False):
+            self._refresh_chars_progress()
+
     def _on_line_edited(self, line_id: str, label: str = "Правка реплики"):
+        self._refresh_chars_progress()
         self.lines_model.refresh_line(line_id)
         self.timeline.canvas.update()
         self.rythmo.update()
