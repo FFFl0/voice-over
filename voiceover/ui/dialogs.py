@@ -405,6 +405,38 @@ class ExportDialog(QDialog):
         f.addRow("Громкость:", self.loudness)
         f.addRow(self.keep_orig)
         f.addRow(self.keep_subs)
+
+        # оформление: видео перекодируется (дольше, чем простая сборка)
+        self.brand = QGroupBox("Оформление (видео будет перекодировано — это дольше)")
+        g = QFormLayout(self.brand)
+        self.logo = QLineEdit()
+        self.logo.setPlaceholderText("PNG с прозрачностью — логотип команды")
+        self.logo_pos = QComboBox()
+        for k, t in (("tr", "справа сверху"), ("tl", "слева сверху"), ("br", "справа снизу"),
+                     ("bl", "слева снизу")):
+            self.logo_pos.addItem(t, k)
+        self.logo_size = QDoubleSpinBox()
+        self.logo_size.setRange(3, 40)
+        self.logo_size.setValue(12)
+        self.logo_size.setSuffix(" % ширины")
+        self.burn = QCheckBox("Вшить субтитры (текст реплик)")
+        self.burn_ok = ffmpeg.has_filter("subtitles")
+        if not self.burn_ok:
+            self.burn.setEnabled(False)
+            self.burn.setToolTip("Эта сборка FFmpeg не умеет вшивать субтитры (нет libass). "
+                                 "Укажите полную сборку FFmpeg в настройках.")
+        self.intro = QLineEdit()
+        self.intro.setPlaceholderText("видео-заставка перед фильмом (необязательно)")
+        g.addRow("Логотип:", path_row(self.logo, "Логотип", "Изображения (*.png *.jpg *.webp)",
+                                      parent=self))
+        pos_row = QHBoxLayout()
+        pos_row.addWidget(self.logo_pos, 1)
+        pos_row.addWidget(self.logo_size)
+        g.addRow("Где и какой:", pos_row)
+        g.addRow(self.burn)
+        g.addRow("Заставка:", path_row(self.intro, "Заставка", "Видео (*.mp4 *.mkv *.mov *.webm)",
+                                       parent=self))
+        f.addRow(self.brand)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Экспортировать")
         bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
@@ -420,7 +452,7 @@ class ExportDialog(QDialog):
 
     def _update(self, *_):
         video = self.kind.currentData() == "video"
-        for w in (self.container, self.keep_orig, self.keep_subs):
+        for w in (self.container, self.keep_orig, self.keep_subs, self.brand):
             w.setEnabled(video)
         self.bitrate.setEnabled(self.codec.currentData() != "flac")
         p = Path(self.out.text())
@@ -449,6 +481,10 @@ class ExportDialog(QDialog):
             keep_subtitles=self.keep_subs.isChecked(),
             track_title=self.title.text().strip() or "Озвучка",
             language=(self.lang.text().strip() or "rus")[:3],
+            logo=self.logo.text().strip(),
+            logo_pos=self.logo_pos.currentData(),
+            logo_size=self.logo_size.value() / 100,
+            intro=self.intro.text().strip(),
         )
 
 

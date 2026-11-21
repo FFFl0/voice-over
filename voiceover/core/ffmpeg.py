@@ -67,11 +67,11 @@ def _popen_kwargs() -> dict:
 
 def run_ffmpeg(args: list[str], duration: float = 0.0,
                progress: Optional[ProgressCb] = None,
-               cancel: Optional[CancelCb] = None) -> None:
+               cancel: Optional[CancelCb] = None, cwd: Optional[str] = None) -> None:
     """Запуск ffmpeg с разбором прогресса (-progress pipe:1)."""
     cmd = [find_ffmpeg(), "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1",
            "-nostats", "-loglevel", "error", *args]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd,
                             text=True, encoding="utf-8", errors="replace", **_popen_kwargs())
     err_lines: list[str] = []
 
@@ -119,6 +119,7 @@ class StreamInfo:
     description: str = ""
     width: int = 0       # для видеопотока
     height: int = 0
+    fps: float = 0.0
 
 
 @dataclass
@@ -176,6 +177,9 @@ def probe(path: str) -> MediaInfo:
             dm = re.search(r"\b(\d{2,5})x(\d{2,5})\b", st.description)
             if dm:
                 st.width, st.height = int(dm.group(1)), int(dm.group(2))
+            fm = re.search(r"(\d+(?:\.\d+)?) fps", st.description)
+            if fm:
+                st.fps = float(fm.group(1))
         # Ищем title в метаданных потока
         for nxt in lines[i + 1:i + 8]:
             if "Stream #" in nxt:
@@ -237,6 +241,18 @@ class ExportOptions:
     track_title: str = "Многоголосая озвучка"
     language: str = "rus"
     loudness: Optional[float] = None   # целевая громкость, LUFS (None — не менять)
+    # Оформление (видео перекодируется): логотип, вшитые субтитры, заставка в начале
+    logo: str = ""
+    logo_pos: str = "tr"                # tl | tr | bl | br
+    logo_size: float = 0.12             # ширина логотипа — доля ширины кадра
+    logo_opacity: float = 0.85
+    burn_subs: str = ""                 # ASS-файл для вшивания
+    intro: str = ""                     # видео-заставка перед фильмом
+    crf: int = 20                       # качество перекодирования H.264
+
+    @property
+    def reencode(self) -> bool:
+        return bool(self.logo or self.burn_subs or self.intro)
 
 
 AUDIO_CODECS = {
@@ -247,11 +263,123 @@ AUDIO_CODECS = {
 }
 
 
+def has_filter(name: str) -> bool:
+    try:
+        out = subprocess.run([find_ffmpeg(), "-hide_banner", "-filters"], capture_output=True,
+                             text=True, encoding="utf-8", errors="replace",
+                             **_popen_kwargs()).stdout
+    except Exception:  # noqa: BLE001
+        return False
+    return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", out, re.M) is not None
+
+
+def filter_name(name: str) -> str:
+    """Имя файла для параметра фильтра: FFmpeg запускается из папки файла, поэтому путь
+    с буквой диска и спецсимволами в граф фильтров не попадает; само имя экранируем."""
+    s = name
+    for ch in ("\\", ":", "'", "[", "]", ",", ";", "=", " "):
+        s = s.replace(ch, "\\\\" + ch if ch in "\\'" else "\\" + ch)
+    return s
+
+
+_LOGO_XY = {"tl": ("{m}", "{m}"), "tr": ("main_w-overlay_w-{m}", "{m}"),
+            "bl": ("{m}", "main_h-overlay_h-{m}"), "br": ("main_w-overlay_w-{m}", "main_h-overlay_h-{m}")}
+
+
+def _mux_reencode(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
+                  original_stream: int, duration: float, progress, cancel) -> None:
+    """Видео с оформлением: логотип, вшитые субтитры, заставка — с перекодированием H.264."""
+    info = probe(video)
+    vw, vh = info.video_size
+    if not vw:
+        raise FFmpegError("В исходном файле нет видео")
+    fps = next((s.fps for s in info.streams if s.kind == "video" and s.fps), 25.0)
+    enc, _ = AUDIO_CODECS.get(opts.codec, ("aac", ""))
+    mp4 = opts.container == "mp4"
+    args = ["-i", video, "-i", mix_wav]
+    nxt = 2
+    graph, v = [], "[0:v]"
+    if opts.logo:
+        args += ["-i", opts.logo]
+        li = nxt
+        nxt += 1
+        m = max(8, vw // 50)
+        x, y = (c.format(m=m) for c in _LOGO_XY.get(opts.logo_pos, _LOGO_XY["tr"]))
+        lw = max(16, int(vw * opts.logo_size)) // 2 * 2
+        graph.append(f"[{li}:v]format=rgba,scale={lw}:-2,"
+                     f"colorchannelmixer=aa={max(0.05, min(1.0, opts.logo_opacity)):.2f}[lg]")
+        graph.append(f"{v}[lg]overlay={x}:{y}[vl]")
+        v = "[vl]"
+    if opts.burn_subs:
+        graph.append(f"{v}subtitles=filename={filter_name(Path(opts.burn_subs).name)}[vs]")
+        v = "[vs]"
+    a0 = "1:a:0"
+    a1 = f"0:a:{original_stream}"
+    intro_dur = 0.0
+    if opts.intro:
+        ii = probe(opts.intro)
+        intro_dur = ii.duration
+        args += ["-i", opts.intro]
+        k = nxt
+        nxt += 1
+        graph.append(f"[{k}:v]scale={vw}:{vh}:force_original_aspect_ratio=decrease,"
+                     f"pad={vw}:{vh}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps:g},format=yuv420p[iv]")
+        graph.append(f"{v}setsar=1,fps={fps:g},format=yuv420p[mv]")
+        graph.append("[iv][mv]concat=n=2:v=1:a=0[vc]")
+        v = "[vc]"
+        fmt = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+        if ii.audio:
+            graph.append(f"[{k}:a:0]{fmt},apad=whole_dur={intro_dur:.3f}[ia]")
+        else:
+            graph.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{intro_dur:.3f}[ia]")
+        graph.append(f"[1:a:0]{fmt}[ma]")
+        graph.append("[ia][ma]concat=n=2:v=0:a=1[a0]")
+        a0 = "[a0]"
+        if opts.keep_original:
+            ms = int(round(intro_dur * 1000))
+            graph.append(f"[0:a:{original_stream}]adelay=delays={ms}:all=1[a1]")
+            a1 = "[a1]"
+    if v == "[0:v]":
+        graph.append("[0:v]null[vo]")
+        v = "[vo]"
+    args += ["-filter_complex", ";".join(graph), "-map", v, "-map", a0]
+    if opts.keep_original:
+        args += ["-map", a1]
+    keep_subs = opts.keep_subtitles and not opts.intro   # после заставки они бы съехали
+    if keep_subs:
+        args += ["-map", "0:s?"]
+    args += ["-c:v", "libx264", "-preset", "medium", "-crf", str(opts.crf),
+             "-pix_fmt", "yuv420p", "-c:a:0", enc]
+    if opts.codec != "flac":
+        args += ["-b:a:0", opts.bitrate]
+    if opts.keep_original:
+        args += ["-c:a:1", "aac", "-b:a:1", "192k"]
+    if keep_subs:
+        args += ["-c:s", "mov_text" if mp4 else "copy"]
+    args += ["-metadata:s:a:0", f"title={opts.track_title}",
+             "-metadata:s:a:0", f"language={opts.language}", "-disposition:a:0", "default"]
+    if opts.keep_original:
+        args += ["-metadata:s:a:1", "title=Оригинал", "-disposition:a:1", "0"]
+    if mp4:
+        args += ["-movflags", "+faststart"]
+    args += [out_path]
+    # пути входов абсолютные; рабочая папка — папка субтитров (см. filter_name)
+    abs_args = [str(Path(a).resolve()) if i > 0 and args[i - 1] == "-i" else a
+                for i, a in enumerate(args)]
+    abs_args[-1] = str(Path(out_path).resolve())
+    cwd = str(Path(opts.burn_subs).resolve().parent) if opts.burn_subs else None
+    run_ffmpeg(abs_args, duration + intro_dur, progress, cancel, cwd=cwd)
+
+
 def mux_video(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
               original_stream: int = 0, duration: float = 0.0,
               progress: Optional[ProgressCb] = None,
               cancel: Optional[CancelCb] = None) -> None:
-    """Собрать видео: видео без перекодирования + новая дорожка (по умолчанию) + оригинал."""
+    """Собрать видео: видео без перекодирования + новая дорожка (по умолчанию) + оригинал.
+    С оформлением (логотип, субтитры, заставка) видео перекодируется."""
+    if opts.reencode:
+        _mux_reencode(video, mix_wav, out_path, opts, original_stream, duration, progress, cancel)
+        return
     enc, _ = AUDIO_CODECS.get(opts.codec, ("aac", ""))
     mp4 = opts.container == "mp4"
     args = ["-i", video, "-i", mix_wav, "-map", "0:v?", "-map", "1:a:0"]

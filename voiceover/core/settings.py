@@ -34,6 +34,9 @@ class AppSettings:
     whisper_device: str = "auto"
     whisper_max_len: float = 7.0
     export_loudness: Optional[float] = -23.0   # LUFS; None — не нормализовать
+    export_logo: str = ""           # логотип команды для экспорта
+    export_logo_pos: str = "tr"
+    export_intro: str = ""          # заставка перед фильмом
     translate_source: str = "auto"
     translate_target: str = "ru"
     translate_engine: str = ""      # local | google | deepl ("" — выбрать автоматически)

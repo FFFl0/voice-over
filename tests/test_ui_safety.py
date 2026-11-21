@@ -85,6 +85,10 @@ def test_export_asks_before_overwrite(win, tmp_path, monkeypatch):
             self.kind.addItem("v", "video")
             self.loudness = QComboBox()
             self.loudness.addItem("не менять", None)
+            from PySide6.QtWidgets import QCheckBox
+            self.logo, self.intro = QLineEdit(), QLineEdit()
+            self.logo_pos = QComboBox()
+            self.burn = QCheckBox()
 
         def exec(self):
             return QDialog.Accepted

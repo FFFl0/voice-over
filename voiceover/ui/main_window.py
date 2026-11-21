@@ -1633,6 +1633,9 @@ class MainWindow(QMainWindow):
         default = str(Path(p.video_path).with_name(Path(p.video_path).stem + ".voiceover.mkv"))
         dlg = ExportDialog(default, self)
         dlg.loudness.setCurrentIndex(max(0, dlg.loudness.findData(self.settings.export_loudness)))
+        dlg.logo.setText(self.settings.export_logo)
+        dlg.logo_pos.setCurrentIndex(max(0, dlg.logo_pos.findData(self.settings.export_logo_pos)))
+        dlg.intro.setText(self.settings.export_intro)
         if dlg.exec() != QDialog.Accepted:
             return
         opts = dlg.options()
@@ -1647,32 +1650,17 @@ class MainWindow(QMainWindow):
                 self, "Экспорт", f"Файл уже существует:\n{out}\n\nЗаменить его?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
-        mix_wav = str(p.project_dir / "mix.wav")
+        burn = dlg.burn.isChecked() and kind == "video"
+        self.settings.export_logo = opts.logo
+        self.settings.export_logo_pos = opts.logo_pos
+        self.settings.export_intro = opts.intro
+        self.settings.save()
 
         def work(t: Task):
-            warnings = mixer.render_project(p, mix_wav, lambda f, s: t.report(f * 0.45, s),
-                                            t.is_cancelled)
-            final_wav = mix_wav
-            if opts.loudness is not None:
-                final_wav = str(p.project_dir / "mix_loudnorm.wav")
-                m = ffmpeg.normalize_loudness(
-                    mix_wav, final_wav, opts.loudness, sample_rate=p.mix.sample_rate,
-                    duration=p.duration,
-                    progress=lambda f: t.report(0.45 + f * 0.2,
-                                                f"Громкость до {opts.loudness:g} LUFS (EBU R128)"),
-                    cancel=t.is_cancelled)
-                try:
-                    warnings.append(f"Громкость: была {float(m['input_i']):.1f} LUFS, "
-                                    f"приведена к {opts.loudness:g} LUFS")
-                except (KeyError, ValueError):
-                    pass
-            prog = lambda f: t.report(0.65 + f * 0.35, "Сборка файла (FFmpeg)")  # noqa: E731
-            if kind == "video":
-                ffmpeg.mux_video(p.video_path, final_wav, out, opts, p.audio_stream, p.duration,
-                                 prog, t.is_cancelled)
-            else:
-                ffmpeg.encode_audio(final_wav, out, opts, p.duration, prog, t.is_cancelled)
-            return warnings
+            from ..core.export import export_project, write_burn_subs
+            if burn:
+                opts.burn_subs = write_burn_subs(p, str(p.project_dir / "burn.ass"))
+            return export_project(p, out, opts, kind, t.report, t.is_cancelled)
 
         def done(warnings):
             self.save_project()
