@@ -55,6 +55,8 @@ def select_take(line: Line, rel: str) -> None:
     remember_offset(line)
     if rel != line.rec_path:
         reset_edits(line)
+        if line.review == "ok":      # одобрен был другой дубль
+            line.review = ""
     line.rec_path = rel
     line.rec_offset = float(line.takes.get(rel, 0.0)) if rel else 0.0
 

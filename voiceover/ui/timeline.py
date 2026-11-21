@@ -309,7 +309,7 @@ class TimelineCanvas(QWidget):
                 hover = ln.id == self._hover
                 # Квадратный блок цвета роли. Готовая реплика — сплошная заливка,
                 # реплика без актуального звука — только контур со штриховкой.
-                ready = st in ("ok", "rec")
+                ready = st in ("ok", "rec", "redo")   # звук есть
                 path = QPainterPath()
                 path.addRoundedRect(r, BLOCK_RADIUS, BLOCK_RADIUS)
                 p.setRenderHint(QPainter.Antialiasing, True)
@@ -328,6 +328,16 @@ class TimelineCanvas(QWidget):
                     p.setPen(QPen(col, 1))
                     p.setBrush(Qt.NoBrush)
                     p.drawPath(path)
+                if st == "redo":    # на переписку — пунктирная рамка цвета предупреждения
+                    p.setPen(QPen(QColor(th.warn), 2, Qt.DashLine))
+                    p.setBrush(Qt.NoBrush)
+                    p.drawRoundedRect(r.adjusted(-1, -1, 1, 1), BLOCK_RADIUS, BLOCK_RADIUS)
+                elif st == "ok" and r.width() > 16:   # одобрено — галочка в углу
+                    cx, cy = r.right() - 9, r.top() + 7
+                    p.setRenderHint(QPainter.Antialiasing, True)
+                    p.setPen(QPen(QColor(th.success), 2))
+                    p.drawPolyline([QPointF(cx - 4, cy), QPointF(cx - 1, cy + 3), QPointF(cx + 4, cy - 3)])
+                    p.setRenderHint(QPainter.Antialiasing, False)
                 if sel:   # SELECT_OUTLINE: рамка акцента снаружи блока + светлая внутренняя
                     p.setRenderHint(QPainter.Antialiasing, True)
                     outer = QPainterPath()

@@ -77,6 +77,9 @@ class Line:
     words: list = field(default_factory=list)
     # Сдвиги всех дублей (путь → сдвиг), чтобы при выборе другого дубля синхрон сохранился
     takes: dict = field(default_factory=dict)
+    # проверка режиссёром: "" — не проверено, "ok" — одобрено, "redo" — переписать
+    review: str = ""
+    review_note: str = ""
 
     @property
     def duration(self) -> float:
@@ -281,13 +284,20 @@ class Project:
 
 def line_status(project: Project, line: Line) -> str:
     """Статус готовности реплики: 'off' (выключена), 'nochar' (без роли),
-    'rec' (записана), 'none' (записи нет)."""
+    'rec' (записана), 'ok' (одобрена режиссёром), 'redo' (на переписку), 'none' (записи нет)."""
     if not line.enabled or not line.text.strip() and not line.rec_path:
         return "off"
     if project.character(line.character_id) is None:
         return "nochar"
     p = project.resolve(line.rec_path)
-    return "rec" if p and p.exists() else "none"
+    if line.review == "redo":
+        return "redo"
+    if not (p and p.exists()):
+        return "none"
+    return "ok" if line.review == "ok" else "rec"
+
+
+DONE_STATUSES = ("rec", "ok")        # реплика готова (записана и не отправлена на переписку)
 
 
 def add_marker(project: "Project", t: float, text: str) -> dict:

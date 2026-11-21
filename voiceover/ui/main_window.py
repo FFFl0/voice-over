@@ -143,7 +143,8 @@ class MainWindow(QMainWindow):
         self.f_char.setMinimumWidth(150)
         self.f_status = QComboBox()
         for label, key in (("Все статусы", "*"), ("Нет записи", "none"),
-                           ("Записаны", "rec"), ("Без роли", "nochar"),
+                           ("Записаны, не проверены", "rec"), ("Одобрены", "ok"),
+                           ("На переписку", "redo"), ("Без роли", "nochar"),
                            ("Выключены", "off"), ("Слишком быстрые", "fast")):
             self.f_status.addItem(label, key)
         filt = QHBoxLayout()
@@ -199,7 +200,8 @@ class MainWindow(QMainWindow):
         sl.setContentsMargins(0, 6, 0, 0)
         sl.setSpacing(28)
         self.stat_labels: dict[str, QLabel] = {}
-        for key, caption in (("ready", "записано"), ("none", "нет записи"), ("nochar", "без роли")):
+        for key, caption in (("ready", "записано"), ("none", "нет записи"), ("redo", "переписать"),
+                             ("nochar", "без роли")):
             box = QVBoxLayout()
             box.setSpacing(0)
             fig = QLabel("0")
@@ -314,6 +316,8 @@ class MainWindow(QMainWindow):
         from .cue import CueOverlay
         self.cue_overlay = CueOverlay(self.player.video, self)
         self.record.cueState.connect(self.cue_overlay.set_state)
+        self.record.reviewRequested.connect(lambda k: self.set_review(k, [self.record.line]
+                                                                      if self.record.line else None))
         self.record.alignRequested.connect(lambda i: self.align_recordings([i], quiet=False))
         self.record.requestLine.connect(self._step_line)
         self.record.playTake.connect(self._play_take)
@@ -675,15 +679,15 @@ class MainWindow(QMainWindow):
             st = line_status(self.project, ln)
             counts[st] = counts.get(st, 0) + 1
         total = len(self.project.lines)
-        ready = counts.get("rec", 0)
+        ready = counts.get("rec", 0) + counts.get("ok", 0)
         self.stat_labels["ready"].setText(f"{ready} из {total}")
         todo = sum(1 for ln in self.project.lines if ln.enabled and ln.text.strip())
         self._progress = ready / todo if todo else None
         self._update_title()
-        for key in ("none", "nochar"):
+        for key in ("none", "redo", "nochar"):
             self.stat_labels[key].setText(str(counts.get(key, 0)))
         th = theme.current()
-        for key, col in (("none", th.error),):
+        for key, col in (("none", th.error), ("redo", th.warn)):
             self.stat_labels[key].setStyleSheet(f"color:{col}" if counts.get(key) else "")
 
     def _toggle_rythmo(self, on: bool):
@@ -1515,6 +1519,16 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_split)
         m.addAction(self.a_merge)
         m.addSeparator()
+        a = m.addAction("Одобрить запись\tA")
+        a.triggered.connect(lambda: self.set_review("ok"))
+        a.setEnabled(any(ln.rec_path for ln in sel))
+        a = m.addAction("На переписку…\tX")
+        a.triggered.connect(lambda: self.set_review("redo"))
+        a.setEnabled(bool(sel))
+        a = m.addAction("Снять отметку режиссёра")
+        a.triggered.connect(lambda: self.set_review(""))
+        a.setEnabled(any(ln.review or ln.review_note for ln in sel))
+        m.addSeparator()
         a = m.addAction("Удалить")
         a.triggered.connect(self.delete_lines)
         a.setEnabled(bool(sel))
@@ -1685,6 +1699,43 @@ class MainWindow(QMainWindow):
         self.player.seek(m["t"])
         self.timeline.canvas.ensure_visible(m["t"], m["t"])
         self.statusBar().showMessage(f"Метка {fmt_clock(m['t'])}: {m['text']}", 6000)
+
+    def set_review(self, kind: str, lines: Optional[list] = None):
+        """Отметка режиссёра: 'ok' — одобрено, 'redo' — переписать (с комментарием), '' — снять."""
+        p = self.project
+        if not p:
+            return
+        if lines is None:
+            lines = self.selected_lines()
+            if not lines and self.tabs.currentWidget() is self.record and self.record.line:
+                lines = [self.record.line]
+        if not lines:
+            self.statusBar().showMessage("Выделите реплики", 3000)
+            return
+        if kind == "ok":
+            lines = [ln for ln in lines if ln.rec_path]
+            if not lines:
+                self.statusBar().showMessage("Одобрить можно только записанные реплики", 4000)
+                return
+        note = ""
+        if kind == "redo":
+            from .dialogs import ask_text
+            old = lines[0].review_note if len(lines) == 1 else ""
+            res = ask_text(self, "На переписку", "Что исправить (необязательно):", old)
+            if res is None:
+                return
+            note = res.strip()
+        for ln in lines:
+            ln.review = kind
+            ln.review_note = note if kind == "redo" else ("" if kind == "ok" else "")
+            self.lines_model.refresh_line(ln.id)
+        self.timeline.canvas.update()
+        self.record.refresh_take()
+        self._update_stats()
+        self._refresh_chars_progress()
+        label = {"ok": "Одобрено", "redo": "На переписку", "": "Снята отметка"}[kind]
+        self.mark_dirty(label)
+        self.statusBar().showMessage(f"{label}: {len(lines)} реплик", 4000)
 
     def split_current(self):
         from ..core.edit_ops import split_line
@@ -2203,6 +2254,8 @@ class MainWindow(QMainWindow):
                 if fw is self.table and not mods:
                     return False
                 self.player.seek(self.player.position() + (-2 if action == "back" else 2))
+            elif action in ("approve", "redo"):
+                self.set_review("ok" if action == "approve" else "redo")
             elif action == "marker":
                 self.add_marker(self.player.position())
             elif action in ("prev_line", "next_line"):

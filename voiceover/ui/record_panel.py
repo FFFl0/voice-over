@@ -41,6 +41,7 @@ class RecordPanel(QWidget):
     playTake = Signal(str)            # путь к файлу дубля
     alignRequested = Signal(str)      # id реплики: подогнать запись к оригиналу
     lineChanged = Signal(object, str)      # реплика (или None) и текст следующей — окну актёра
+    reviewRequested = Signal(str)          # "ok" | "redo" — отметка режиссёра
     cueState = Signal(str, float, float)   # режим отсчёта, секунд до реплики, прошло (cue.py)
 
     def __init__(self, player: VideoPlayer, settings: AppSettings, parent=None):
@@ -158,6 +159,15 @@ class RecordPanel(QWidget):
         self.trim_out = spin(0, 30, 0.05, " с", "Обрезать конец дубля")
         self.fade_in = spin(0, 5, 0.05, " с", "Плавное нарастание в начале")
         self.fade_out = spin(0, 5, 0.05, " с", "Плавное затухание в конце")
+        self.btn_ok = QPushButton(theme.icon("check", theme.current().success), " Одобрить")
+        self.btn_ok.setToolTip("Дубль принят режиссёром (A)")
+        self.btn_redo = QPushButton(theme.icon("refresh", theme.current().warn), " Переписать…")
+        self.btn_redo.setToolTip("Отправить реплику на переписку с комментарием (X)")
+        self.btn_ok.clicked.connect(lambda: self.reviewRequested.emit("ok"))
+        self.btn_redo.clicked.connect(lambda: self.reviewRequested.emit("redo"))
+        self.review_lbl = QLabel()
+        self.review_lbl.setTextFormat(Qt.PlainText)
+        self.review_lbl.setWordWrap(True)
         self.take_box = QComboBox()
         self.take_box.setToolTip("Дубли реплики. Выбранный идёт в сведение; остальные хранятся, "
                                  "к ним можно вернуться. Слушать — P.")
@@ -213,6 +223,9 @@ class RecordPanel(QWidget):
         take.addWidget(QLabel("Сдвиг:"))
         take.addWidget(self.offset)
         take.addWidget(self.btn_align)
+        take.addSpacing(12)
+        take.addWidget(self.btn_ok)
+        take.addWidget(self.btn_redo)
 
         edits = QHBoxLayout()
         for lbl, w in (("Громкость:", self.gain), ("Обрезать:", self.trim_in), ("–", self.trim_out),
@@ -234,6 +247,7 @@ class RecordPanel(QWidget):
         head.addWidget(self.length)
         cl.addLayout(head)
         cl.addWidget(self.note)
+        cl.addWidget(self.review_lbl)
         cl.addSpacing(6)
         cl.addWidget(self.prev_lbl)
         cl.addWidget(self.prompt)
@@ -382,6 +396,9 @@ class RecordPanel(QWidget):
         self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
         self.offset.setEnabled(has_take and not recording)
         self.btn_align.setEnabled(has_take and not recording)
+        self.btn_ok.setEnabled(has_take and not recording)
+        self.btn_redo.setEnabled(has_line and not recording)
+        self._show_review()
         for w in (self.gain, self.trim_in, self.trim_out, self.fade_in, self.fade_out):
             w.setEnabled(has_take and not recording)
         self.btn_prev.setEnabled(not recording)
@@ -430,6 +447,22 @@ class RecordPanel(QWidget):
         self.offset.setValue(self.line.rec_offset)
         self.offset.blockSignals(False)
         self._update_buttons()
+
+    def _show_review(self):
+        ln = self.line
+        th = theme.current()
+        if ln is None or (not ln.review and not ln.review_note):
+            self.review_lbl.setVisible(False)
+            return
+        if ln.review == "ok":
+            text, col = "✓ Одобрено режиссёром", th.success
+        elif ln.review == "redo":
+            text, col = "↺ Переписать" + (f": {ln.review_note}" if ln.review_note else ""), th.warn
+        else:
+            text, col = f"Замечание к прошлому дублю: {ln.review_note}", th.muted
+        self.review_lbl.setText(text)
+        self.review_lbl.setStyleSheet(f"color:{col}")
+        self.review_lbl.setVisible(True)
 
     def _fill_takes(self):
         import datetime
@@ -516,6 +549,7 @@ class RecordPanel(QWidget):
         # Прежние дубли не удаляем: они остаются в списке «Дубль»
         remember_offset(ln)
         reset_edits(ln)
+        ln.review = ""          # новый дубль — режиссёр проверяет заново
         ln.rec_path = self.project.relative(Path(self._rec_path))
         ln.rec_offset = round(offset, 3)
         remember_offset(ln)

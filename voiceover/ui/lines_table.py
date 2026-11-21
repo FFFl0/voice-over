@@ -23,6 +23,8 @@ RATE_TIP = ("Темп: слогов в секунду, которые нужно
 
 STATUS_TEXT = {
     "rec": "записано",
+    "ok": "одобрено ✓",
+    "redo": "переписать",
     "none": "нет записи",
     "nochar": "нет роли",
     "off": "выкл.",
@@ -156,6 +158,8 @@ class LinesModel(QAbstractTableModel):
                 if ln.orig_text:
                     tip += f"\n\nОригинал: {ln.orig_text}"
                 tip += f"\n\nЗаметка: {ln.note}" if ln.note else ""
+                if ln.review == "redo":
+                    tip += "\n\nПереписать" + (f": {ln.review_note}" if ln.review_note else "")
                 from html import escape   # подсказка Qt распознаёт HTML — показываем как текст
                 return "<qt>" + escape(tip).replace("\n", "<br>") + "</qt>"
             if c == C_RATE:

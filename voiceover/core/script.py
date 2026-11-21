@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from .models import Project, line_status
+from .models import DONE_STATUSES, Project, line_status
 from .rythmo import spoken_text
 from .subtitles import fmt_clock
 
@@ -26,7 +26,7 @@ def stats(project: Project) -> list[dict]:
         lines = [ln for ln in project.lines if ln.character_id == c.id and ln.enabled]
         out.append({"id": c.id, "name": c.name, "actor": c.actor, "lines": len(lines),
                     "words": sum(word_count(ln.text) for ln in lines),
-                    "recorded": sum(1 for ln in lines if line_status(project, ln) == "rec")})
+                    "recorded": sum(1 for ln in lines if line_status(project, ln) in DONE_STATUSES)})
     return out
 
 
@@ -77,7 +77,11 @@ def build_html(project: Project, character_ids: Iterable[str]) -> str:
         out.append("<table width='100%' cellspacing='0'><tr><th width='5%'>№</th><th width='13%'>Время</th><th width='55%'>Текст</th><th>Заметка</th>"
                    "<th width='4%'>✓</th></tr>")
         for ln in lines:
-            done = "✓" if line_status(project, ln) == "rec" else ""
+            status = line_status(project, ln)
+            done = "✓" if status in DONE_STATUSES else ("↺" if status == "redo" else "")
+            if status == "redo":
+                ln_note = "Переписать" + (f": {ln.review_note}" if ln.review_note else "")
+                ln = type(ln)(**{**ln.to_dict(), "note": "; ".join(x for x in (ln_note, ln.note) if x)})
             orig = (f"<br><span class='m'>{html.escape(ln.orig_text)}</span>"
                     if ln.orig_text else "")
             out.append(f"<tr><td class='m'>{numbers[ln.id]}</td>"
