@@ -351,6 +351,8 @@ class MainWindow(QMainWindow):
         self.a_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.a_separate = act("Отделить голоса", self.separate, None, "separate",
                               "Убрать оригинальные голоса, оставив музыку и звуки (Demucs)")
+        self.a_diarize = act("Роли по голосам…", self.diarize_roles, None, "users",
+                             "Разложить реплики по персонажам по звучанию голоса")
         self.a_align = act("Подогнать записи к оригиналу", lambda: self.align_recordings(),
                            "Ctrl+L", None, "Сдвинуть записи выделенных реплик так, чтобы слоги "
                            "и паузы совпали с голосом оригинала")
@@ -392,7 +394,8 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
-        for a in (self.a_whisper, self.a_translate, self.a_restore, self.a_separate, self.a_align):
+        for a in (self.a_whisper, self.a_diarize, self.a_translate, self.a_restore, self.a_separate,
+                  self.a_align):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_preview)
@@ -536,7 +539,8 @@ class MainWindow(QMainWindow):
                   self.a_export_srt, self.a_preview,
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
-                  self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems):
+                  self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems,
+                  self.a_diarize):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -1109,6 +1113,70 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
+    def diarize_roles(self):
+        p = self.project
+        if not p:
+            return
+        from PySide6.QtWidgets import QFormLayout, QRadioButton
+        from ..core import diarize
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Роли по голосам")
+        f = QFormLayout(dlg)
+        info = QLabel("Реплики группируются по звучанию голоса. Чтобы группы получили имена "
+                      "ваших персонажей, заранее отметьте по 2–3 реплики каждого — остальные "
+                      "программа определит сама. Новые голоса получат имена «Голос 1», «Голос 2»…\n"
+                      "Точнее работает после «Отделить голоса».")
+        info.setWordWrap(True)
+        f.addRow(info)
+        n = QComboBox()
+        n.addItem("Определить автоматически", None)
+        for k in range(2, 21):
+            n.addItem(str(k), k)
+        f.addRow("Сколько голосов:", n)
+        r1 = QRadioButton("Только репликам без роли")
+        r2 = QRadioButton("Всем репликам (перезаписать роли)")
+        r1.setChecked(True)
+        f.addRow(r1)
+        f.addRow(r2)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        f.addRow(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        only, voices = r1.isChecked(), n.currentData()
+        model_dir = str(data_dir() / "models" / "wespeaker")
+
+        def work(t: Task):
+            q = Project.from_dict(p.to_dict())   # считаем на копии: интерфейс не трогаем
+            q.path = p.path
+            res = diarize.assign_roles(q, only, voices, model_dir, t.report, t.is_cancelled)
+            return q, res
+
+        def done(out):
+            q, res = out
+            p.characters = q.characters
+            for ln, lq in zip(p.lines, q.lines):
+                ln.character_id = lq.character_id
+            for ch in res.new_characters:
+                prepare_new_character(p, ch)
+            self.chars.reload()
+            self.refresh_all()
+            self.mark_dirty("Роли по голосам")
+            msg = f"Назначено ролей: {res.assigned}."
+            if res.new_characters:
+                msg += f"\nНовые персонажи: {', '.join(c.name for c in res.new_characters)} — " \
+                       "переименуйте их на вкладке «Персонажи» или объедините с нужными."
+            if res.skipped_short:
+                msg += f"\nСлишком коротких реплик (меньше 0.6 с) пропущено: {res.skipped_short}."
+            if not res.used_model:
+                msg += ("\n\nМодель голосов не загрузилась (нет интернета или модуля "
+                        "onnxruntime) — использован простой способ, он различает в основном "
+                        "мужские, женские и детские голоса. Проверьте результат.")
+            QMessageBox.information(self, "Роли по голосам", msg)
+
+        self.run_task(Task("Роли по голосам", work), done)
+
     def export_stems(self):
         p = self.project
         if not p:
