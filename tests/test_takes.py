@@ -119,3 +119,56 @@ def test_loop_recording_flow(tmp_path, monkeypatch):
     panel._loop_again()
     assert not panel.is_recording()
     del app
+
+
+def test_take_editor_drag(tmp_path):
+    """Обрезка, фейд и сдвиг мышью в визуальном редакторе дубля."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from voiceover.core.settings import AppSettings
+    from voiceover.ui.record_panel import RecordPanel
+    from voiceover.ui.video_player import VideoPlayer
+    p, ln = make(tmp_path, n=1)                          # дубль 0.1 с — мало, перепишем на 2 с
+    sf.write(p.resolve(ln.rec_path), (0.3 * np.sin(np.arange(96000) / 7)).astype(np.float32), 48000)
+    ln.rec_offset = 0.0
+    panel = RecordPanel(VideoPlayer(), AppSettings())
+    panel.setEnabled(True)
+    panel.set_project(p)
+    panel.set_line(ln)
+    ed = panel.editor
+    ed.resize(800, 190)
+    assert abs(ed.dur - 2.0) < 1e-6
+    got = []
+    panel.recorded.connect(got.append)
+
+    def drag(x0, y0, x1):
+        ed.mousePressEvent(QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(x0, y0),
+                                       QPointF(x0, y0), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        ed.mouseMoveEvent(QMouseEvent(QMouseEvent.MouseMove, QPointF(x1, y0), QPointF(x1, y0),
+                                      Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+        ed.mouseReleaseEvent(QMouseEvent(QMouseEvent.MouseButtonRelease, QPointF(x1, y0),
+                                         QPointF(x1, y0), Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+
+    mid_y = ed.height() / 2
+    px_per_s = ed._x(1.0) - ed._x(0.0)
+    xa = ed._x(ln.start + ln.rec_offset)
+    drag(xa, mid_y, xa + 0.3 * px_per_s)                 # начало — обрезать 0.3 с
+    assert abs(ln.trim_in - 0.3) < 0.02 and abs(panel.trim_in.value() - ln.trim_in) < 1e-9
+    xb = ed._x(ln.start + ln.rec_offset + ed.dur)
+    drag(xb, mid_y, xb - 0.5 * px_per_s)                 # конец — 0.5 с
+    assert abs(ln.trim_out - 0.5) < 0.02
+    ka, _kb = ed._kept()
+    drag(ed._x(ka), 18, ed._x(ka) + 0.2 * px_per_s)      # квадратик нарастания
+    assert abs(ln.fade_in - 0.2) < 0.02 and ln.trim_in > 0.25   # обрезка не задета
+    drag(ed._x(ka + 0.6), mid_y, ed._x(ka + 0.6) + 0.25 * px_per_s)   # сдвиг всей записи
+    assert abs(ln.rec_offset - 0.25) < 0.02 and abs(panel.offset.value() - ln.rec_offset) < 1e-9
+    assert len(got) == 4
+    ed.mouseDoubleClickEvent(QMouseEvent(QMouseEvent.MouseButtonDblClick,
+                                         QPointF(ed._x(ed._kept()[0]), mid_y),
+                                         QPointF(0, 0), Qt.LeftButton, Qt.LeftButton,
+                                         Qt.NoModifier))
+    assert ln.trim_in == 0.0
+    assert not ed.grab().isNull()
+    del app

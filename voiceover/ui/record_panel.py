@@ -217,7 +217,14 @@ class RecordPanel(QWidget):
         lay.addLayout(btns)
         lay.addLayout(take)
         lay.addLayout(edits)
-        lay.addStretch(1)
+        from .take_editor import TakeEditor
+        self.editor = TakeEditor()
+        lay.addWidget(self.editor, 1)
+        self.editor.changed.connect(self._editor_changed)
+        self.editor.edited.connect(lambda _l: self.line and self.recorded.emit(self.line.id))
+        self.editor.seekRequested.connect(self.player.seek)
+        self.player.positionChanged.connect(
+            lambda t: self.editor.isVisible() and self.editor.set_playhead(t))
 
         self.btn_refresh.clicked.connect(self.refresh_devices)
         self.device.currentIndexChanged.connect(self._device_changed)
@@ -339,6 +346,8 @@ class RecordPanel(QWidget):
 
     def _load_edits(self):
         ln = self.line
+        ch = self.project.character(ln.character_id) if (ln and self.project) else None
+        self.editor.set_line(self.project, ln, ch.color if ch else "")
         for w, v in ((self.gain, ln.gain_db if ln else 0.0), (self.trim_in, ln.trim_in if ln else 0.0),
                      (self.trim_out, ln.trim_out if ln else 0.0),
                      (self.fade_in, ln.fade_in if ln else 0.0),
@@ -347,6 +356,19 @@ class RecordPanel(QWidget):
             w.setValue(v)
             w.blockSignals(False)
 
+    def _editor_changed(self):
+        """Правка мышью в редакторе дубля — обновить поля, не вызывая их обработчики."""
+        ln = self.line
+        if not ln:
+            return
+        for w, v in ((self.trim_in, ln.trim_in), (self.trim_out, ln.trim_out),
+                     (self.fade_in, ln.fade_in), (self.fade_out, ln.fade_out),
+                     (self.offset, ln.rec_offset)):
+            w.blockSignals(True)
+            w.setValue(v)
+            w.blockSignals(False)
+        remember_offset(ln)
+
     def _edits_changed(self, *_):
         ln = self.line
         if not ln:
@@ -354,6 +376,7 @@ class RecordPanel(QWidget):
         ln.gain_db = self.gain.value()
         ln.trim_in, ln.trim_out = self.trim_in.value(), self.trim_out.value()
         ln.fade_in, ln.fade_out = self.fade_in.value(), self.fade_out.value()
+        self.editor.update()
         self.recorded.emit(ln.id)
 
     def refresh_take(self) -> None:
@@ -516,6 +539,7 @@ class RecordPanel(QWidget):
         if self.line:
             self.line.rec_offset = v
             remember_offset(self.line)
+            self.editor.set_line(self.project, self.line)
             self.recorded.emit(self.line.id)
 
     def is_recording(self) -> bool:
