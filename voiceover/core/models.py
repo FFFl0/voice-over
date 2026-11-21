@@ -125,6 +125,8 @@ class Project:
     # Пути к служебным файлам (относительно папки проекта)
     original_wav: str = ""
     background_wav: str = ""      # фон без голосов (Demucs)
+    # Пакет для актёра: {"characters": [id…], "source": имя проекта}; пусто — обычный проект
+    package: dict = field(default_factory=dict)
     path: str = ""                # где сохранён .vop (не сериализуется)
 
     # ---------- персонажи ----------
@@ -199,6 +201,7 @@ class Project:
             "original_wav": self.original_wav,
             "background_wav": self.background_wav,
             "mix": self.mix.to_dict(),
+            "package": self.package,
             "characters": [c.to_dict() for c in self.characters],
             "lines": [ln.to_dict() for ln in self.lines],
         }
@@ -213,6 +216,7 @@ class Project:
             original_wav=d.get("original_wav", ""),
             background_wav=d.get("background_wav", ""),
             mix=MixSettings.from_dict(d.get("mix", {})),
+            package=dict(d.get("package") or {}),
             characters=[Character.from_dict(c) for c in d.get("characters", [])],
             lines=[Line.from_dict(x) for x in d.get("lines", [])],
         )

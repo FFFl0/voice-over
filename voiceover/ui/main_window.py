@@ -34,7 +34,7 @@ from .record_panel import RecordPanel
 from .timeline import Timeline
 from .video_player import VideoPlayer
 from .welcome import WelcomePage
-from . import text_tools
+from . import team_tools, text_tools
 from .workers import Task, pool
 
 PROJECT_FILTER = f"Проект озвучки (*{PROJECT_EXT})"
@@ -335,6 +335,13 @@ class MainWindow(QMainWindow):
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
         self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
+        self.a_pkg_export = act("Пакет для актёра…", lambda: team_tools.export_package(self),
+                                tip="Проект и сценарий ролей для записи на удалёнке")
+        self.a_pkg_open = act("Открыть пакет актёра…", lambda: team_tools.open_package(self))
+        self.a_rec_send = act("Отправить записи…", lambda: team_tools.send_recordings(self),
+                              tip="Записи ваших ролей в zip для режиссёра")
+        self.a_rec_import = act("Загрузить записи актёров…",
+                                lambda: team_tools.import_recordings(self))
         self.a_quit = act("Выход", self.close, "Ctrl+Q")
         self.a_undo = act("Отменить", self.undo, QKeySequence.Undo, "undo")
         self.a_redo = act("Повторить", self.redo, "Ctrl+Y", "redo")
@@ -361,6 +368,13 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         for a in (self.a_import, self.a_export_srt, self.a_export):
             m.addAction(a)
+        m.addSeparator()
+        tm = m.addMenu("Актёры на удалёнке")
+        for a in (self.a_pkg_export, self.a_rec_import):
+            tm.addAction(a)
+        tm.addSeparator()
+        for a in (self.a_pkg_open, self.a_rec_send):
+            tm.addAction(a)
         m.addSeparator()
         m.addAction(self.a_settings)
         m.addAction(self.a_quit)
@@ -515,10 +529,12 @@ class MainWindow(QMainWindow):
         for a in (self.a_save, self.a_save_as, self.a_close, self.a_import, self.a_export,
                   self.a_export_srt, self.a_preview,
                   self.a_preview_full, self.a_separate, self.a_whisper,
-                  self.a_cleanup, self.a_translate, self.a_restore):
+                  self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
+                  self.a_rec_send, self.a_rec_import):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
+        self.a_pkg_open.setEnabled(not busy)
         self._update_undo_actions()
 
     def _update_undo_actions(self):
