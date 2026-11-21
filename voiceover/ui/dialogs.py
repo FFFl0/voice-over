@@ -612,6 +612,13 @@ class TranscribeDialog(QDialog):
                       "(выделите реплики → «Роль»). Модель скачивается при первом запуске.")
         note.setWordWrap(True)
         note.setObjectName("muted")
+        self.warn = QLabel("⚠ Распознавание работает не всегда корректно: возможны ошибки в "
+                           "словах, пропущенные или лишние фразы, неточные границы реплик — "
+                           "особенно при музыке, шуме, криках и нескольких голосах сразу. "
+                           "Проверьте текст и тайминг перед записью. Точнее работает после "
+                           "«Отделить голоса» и с моделью large-v3.")
+        self.warn.setWordWrap(True)
+        self.warn.setStyleSheet(f"color:{theme.current().warn}")
 
         f = QFormLayout()
         f.addRow("Источник звука:", self.source)
@@ -628,6 +635,7 @@ class TranscribeDialog(QDialog):
         bb.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
         lay.addLayout(f)
+        lay.addWidget(self.warn)
         lay.addWidget(note)
         lay.addWidget(bb)
 
