@@ -192,6 +192,18 @@ def probe(path: str) -> MediaInfo:
     return info
 
 
+def track_label(st: StreamInfo) -> str:
+    """Короткая подпись звуковой дорожки: язык, название, кодек и каналы."""
+    parts = []
+    if st.language and st.language != "und":
+        parts.append(st.language)
+    if st.title:
+        parts.append(f"«{st.title}»")
+    ch = re.search(r"\b(mono|stereo|[1-7]\.[01](?:\(\w+\))?)", st.description)
+    parts.append(st.codec.upper() + (f" {ch.group(1)}" if ch else ""))
+    return " · ".join(parts)
+
+
 # ---------------------------------------------------------------- операции
 
 def extract_audio(video: str, out_wav: str, stream: int = 0, sample_rate: int = 48000,
@@ -237,6 +249,7 @@ class ExportOptions:
     codec: str = "aac"              # aac | ac3 | flac | opus
     bitrate: str = "256k"
     keep_original: bool = True
+    all_originals: bool = True          # все дорожки исходного файла, а не только основную
     keep_subtitles: bool = True
     track_title: str = "Многоголосая озвучка"
     language: str = "rus"
@@ -261,6 +274,36 @@ AUDIO_CODECS = {
     "opus": ("libopus", "Opus"),
     "flac": ("flac", "FLAC (без потерь)"),
 }
+
+
+def _original_tracks(video: str, opts: "ExportOptions", main: int) -> list[tuple[int, str]]:
+    """Какие дорожки исходника оставить: [(номер среди аудио, название для метаданных)]."""
+    if not opts.keep_original:
+        return []
+    try:
+        audio = probe(video).audio
+    except Exception:  # noqa: BLE001
+        audio = []
+    if not audio:
+        return [(main, "Оригинал")]
+    keep = audio if opts.all_originals else [a for a in audio if a.type_index == main] or audio[:1]
+    out = []
+    for a in keep:
+        title = a.title or ("Оригинал" + (f" ({a.language})" if a.language and
+                                          a.language != "und" else ""))
+        out.append((a.type_index, title))
+    return out
+
+
+def _original_args(tracks: list[tuple[int, str]], mp4: bool, sources: list[str]) -> list[str]:
+    """Кодеки и метаданные дорожек оригинала (выходные индексы 1…N)."""
+    args = []
+    for j, ((_k, title), src) in enumerate(zip(tracks, sources), start=1):
+        args += [f"-c:a:{j}", "aac" if mp4 else "copy"]
+        if mp4:
+            args += [f"-b:a:{j}", "192k"]
+        args += [f"-metadata:s:a:{j}", f"title={title}", f"-disposition:a:{j}", "0"]
+    return args
 
 
 def has_filter(name: str) -> bool:
@@ -314,7 +357,8 @@ def _mux_reencode(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
         graph.append(f"{v}subtitles=filename={filter_name(Path(opts.burn_subs).name)}[vs]")
         v = "[vs]"
     a0 = "1:a:0"
-    a1 = f"0:a:{original_stream}"
+    tracks = _original_tracks(video, opts, original_stream)
+    orig_maps = [f"0:a:{k}" for k, _t in tracks]
     intro_dur = 0.0
     if opts.intro:
         ii = probe(opts.intro)
@@ -335,16 +379,16 @@ def _mux_reencode(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
         graph.append(f"[1:a:0]{fmt}[ma]")
         graph.append("[ia][ma]concat=n=2:v=0:a=1[a0]")
         a0 = "[a0]"
-        if opts.keep_original:
-            ms = int(round(intro_dur * 1000))
-            graph.append(f"[0:a:{original_stream}]adelay=delays={ms}:all=1[a1]")
-            a1 = "[a1]"
+        ms = int(round(intro_dur * 1000))
+        for j, (k, _t) in enumerate(tracks):
+            graph.append(f"[0:a:{k}]adelay=delays={ms}:all=1[o{j}]")
+        orig_maps = [f"[o{j}]" for j in range(len(tracks))]
     if v == "[0:v]":
         graph.append("[0:v]null[vo]")
         v = "[vo]"
     args += ["-filter_complex", ";".join(graph), "-map", v, "-map", a0]
-    if opts.keep_original:
-        args += ["-map", a1]
+    for m in orig_maps:
+        args += ["-map", m]
     keep_subs = opts.keep_subtitles and not opts.intro   # после заставки они бы съехали
     if keep_subs:
         args += ["-map", "0:s?"]
@@ -352,14 +396,12 @@ def _mux_reencode(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
              "-pix_fmt", "yuv420p", "-c:a:0", enc]
     if opts.codec != "flac":
         args += ["-b:a:0", opts.bitrate]
-    if opts.keep_original:
-        args += ["-c:a:1", "aac", "-b:a:1", "192k"]
+    # после заставки дорожки сдвинуты фильтром — их нужно перекодировать
+    args += _original_args(tracks, mp4 or bool(opts.intro), orig_maps)
     if keep_subs:
         args += ["-c:s", "mov_text" if mp4 else "copy"]
     args += ["-metadata:s:a:0", f"title={opts.track_title}",
              "-metadata:s:a:0", f"language={opts.language}", "-disposition:a:0", "default"]
-    if opts.keep_original:
-        args += ["-metadata:s:a:1", "title=Оригинал", "-disposition:a:1", "0"]
     if mp4:
         args += ["-movflags", "+faststart"]
     args += [out_path]
@@ -382,26 +424,21 @@ def mux_video(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
         return
     enc, _ = AUDIO_CODECS.get(opts.codec, ("aac", ""))
     mp4 = opts.container == "mp4"
+    tracks = _original_tracks(video, opts, original_stream)
     args = ["-i", video, "-i", mix_wav, "-map", "0:v?", "-map", "1:a:0"]
-    if opts.keep_original:
-        args += ["-map", f"0:a:{original_stream}"]
+    for k, _t in tracks:
+        args += ["-map", f"0:a:{k}"]
     if opts.keep_subtitles:
         args += ["-map", "0:s?"]
     args += ["-c:v", "copy", "-c:a:0", enc]
     if opts.codec != "flac":
         args += ["-b:a:0", opts.bitrate]
-    if opts.keep_original:
-        # MP4 поддерживает не все кодеки — оригинал перекодируем в AAC
-        args += ["-c:a:1", "aac" if mp4 else "copy"]
-        if mp4:
-            args += ["-b:a:1", "192k"]
+    args += _original_args(tracks, mp4, [f"0:a:{k}" for k, _t in tracks])
     if opts.keep_subtitles:
         args += ["-c:s", "mov_text" if mp4 else "copy"]
     args += ["-metadata:s:a:0", f"title={opts.track_title}",
              "-metadata:s:a:0", f"language={opts.language}",
              "-disposition:a:0", "default"]
-    if opts.keep_original:
-        args += ["-metadata:s:a:1", "title=Оригинал", "-disposition:a:1", "0"]
     if mp4:
         args += ["-movflags", "+faststart"]
     args += ["-max_interleave_delta", "0", out_path]

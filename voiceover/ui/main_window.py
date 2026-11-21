@@ -380,6 +380,8 @@ class MainWindow(QMainWindow):
                              "Разложить реплики по персонажам по звучанию голоса")
         self.a_batch = act("Пакетная обработка серий…", self._open_batch, None, None,
                            "Извлечь звук, отделить голоса и экспортировать несколько серий подряд")
+        self.a_track = act("Основная дорожка оригинала…", self.choose_main_track, None, None,
+                           "Выбрать, какая звуковая дорожка видео — оригинал для работы")
         self.a_align = act("Подогнать записи к оригиналу", lambda: self.align_recordings(),
                            "Ctrl+L", None, "Сдвинуть записи выделенных реплик так, чтобы слоги "
                            "и паузы совпали с голосом оригинала")
@@ -432,8 +434,8 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
-        for a in (self.a_whisper, self.a_diarize, self.a_translate, self.a_restore, self.a_separate,
-                  self.a_align):
+        for a in (self.a_track, self.a_whisper, self.a_diarize, self.a_translate, self.a_restore,
+                  self.a_separate, self.a_align):
             m.addAction(a)
         m.addAction(self.a_batch)
         m.addSeparator()
@@ -768,9 +770,11 @@ class MainWindow(QMainWindow):
         self._fill_char_combos()
         self._update_stats()
         self.stack.setCurrentIndex(1 if p else 0)
+        self.player.set_audio_tracks([])
         if p and p.video_path:
             if Path(p.video_path).exists():
                 self.player.load(p.video_path)
+                self._load_track_labels()
             else:
                 QMessageBox.warning(self, "Видео не найдено",
                                     f"Файл видео не найден:\n{p.video_path}\n\nУкажите его заново.")
@@ -1241,6 +1245,55 @@ class MainWindow(QMainWindow):
     def _actor_closed(self):
         self.actor_win = None
         self.a_actor.setChecked(False)
+
+    def _load_track_labels(self):
+        """Подписи звуковых дорожек видео для выбора «Звук» в плеере."""
+        p = self.project
+        self._audio_tracks = []
+        try:
+            self._audio_tracks = ffmpeg.probe(p.video_path).audio
+        except Exception:  # noqa: BLE001
+            pass
+        self.player.set_audio_tracks([ffmpeg.track_label(a) for a in self._audio_tracks],
+                                     p.audio_stream)
+        self.a_track.setEnabled(len(self._audio_tracks) > 1)
+
+    def choose_main_track(self):
+        """Сменить основную дорожку оригинала: по ней строятся волна, распознавание,
+        отделение голосов и закадровое сведение."""
+        p = self.project
+        tracks = getattr(self, "_audio_tracks", [])
+        if not p or len(tracks) < 2:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        items = [f"#{a.type_index + 1}: {ffmpeg.track_label(a)}" for a in tracks]
+        cur = next((i for i, a in enumerate(tracks) if a.type_index == p.audio_stream), 0)
+        item, ok = QInputDialog.getItem(
+            self, "Основная дорожка оригинала",
+            "По этой дорожке строятся волна, распознавание речи, отделение голосов\n"
+            "и закадровое сведение. Остальные дорожки сохранятся в экспорте.",
+            items, cur, False)
+        if not ok:
+            return
+        k = tracks[items.index(item)].type_index
+        if k == p.audio_stream:
+            return
+        bg = p.resolve(p.background_wav)
+        if bg and bg.exists() and QMessageBox.question(
+                self, "Основная дорожка",
+                "Голоса были отделены от прежней дорожки — их нужно будет отделить заново.\n"
+                "Продолжить?") != QMessageBox.Yes:
+            return
+        p.audio_stream = k
+        p.background_wav = ""
+        for name in ("background.wav", "vocals.wav"):
+            (p.project_dir / name).unlink(missing_ok=True)
+        p.original_wav = ""
+        self.mix_panel.set_background_status(False)
+        self.save_project()
+        self.player.set_audio_tracks([ffmpeg.track_label(a) for a in tracks], k)
+        self.extract_original()
+        self.statusBar().showMessage(f"Основная дорожка: {item}", 6000)
 
     def _open_batch(self):
         from .batch_dialog import open_batch

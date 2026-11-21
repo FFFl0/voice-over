@@ -57,7 +57,8 @@ class VideoPlayer(QWidget):
         self.dur_lbl.setObjectName("muted")
         self.dur_lbl.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
         self.sound = QComboBox()
-        self.sound.addItems(["Звук: оригинал", "Звук: озвучка (превью)", "Без звука"])
+        self.main_track = 0            # дорожка оригинала проекта (по ней отделены голоса)
+        self.set_audio_tracks([])
         self.sound.setToolTip("Что слышно при воспроизведении. Превью собирается кнопкой "
                               "«Собрать превью» на панели инструментов.")
         self.vol = QSlider(Qt.Horizontal)
@@ -93,6 +94,7 @@ class VideoPlayer(QWidget):
         self.player.durationChanged.connect(self._on_dur)
         self.player.playbackStateChanged.connect(self._on_state)
         self.sound.currentIndexChanged.connect(self._apply_sound)
+        self.player.tracksChanged.connect(self._apply_sound)   # дорожки известны после загрузки
         self.vol.valueChanged.connect(self._apply_sound)
         self._apply_sound()
 
@@ -149,7 +151,47 @@ class VideoPlayer(QWidget):
         self.dub.setSource(QUrl.fromLocalFile(wav))
         self._dub_offset = offset
         self._dub_len = length
-        self.sound.setCurrentIndex(1)
+        self.set_sound_mode("dub")
+
+    # ------------------------------------------------------------ дорожки
+    def set_audio_tracks(self, labels: list[str], main: int = 0) -> None:
+        """Пункты «Звук»: каждая дорожка оригинала, превью озвучки, без звука.
+        Данные пункта — строка: «orig:N», «dub», «none»."""
+        prev = self.sound.currentData() if self.sound.count() else f"orig:{main}"
+        if prev == f"orig:{self.main_track}":
+            prev = f"orig:{main}"          # слушали основную — остаёмся на основной
+        self.main_track = main
+        self.sound.blockSignals(True)
+        self.sound.clear()
+        if len(labels) <= 1:
+            self.sound.addItem("Звук: оригинал", f"orig:{main}")
+        else:
+            for i, lbl in enumerate(labels):
+                mark = " — основная" if i == main else ""
+                self.sound.addItem(f"Оригинал {i + 1}: {lbl}{mark}", f"orig:{i}")
+        self.sound.addItem("Звук: озвучка (превью)", "dub")
+        self.sound.addItem("Без звука", "none")
+        i = self.sound.findData(prev)
+        if i < 0 and str(prev).startswith("orig"):
+            i = self.sound.findData(f"orig:{main}")
+        self.sound.setCurrentIndex(max(0, i))
+        self.sound.blockSignals(False)
+        if hasattr(self, "vol"):
+            self._apply_sound()
+
+    def sound_mode(self) -> str:
+        d = str(self.sound.currentData() or "orig")
+        return d.split(":")[0]
+
+    def orig_track(self) -> int:
+        d = str(self.sound.currentData() or "")
+        return int(d.split(":")[1]) if d.startswith("orig:") else self.main_track
+
+    def set_sound_mode(self, mode: str) -> None:
+        key = f"orig:{self.main_track}" if mode == "orig" else mode
+        i = self.sound.findData(key)
+        if i >= 0:
+            self.sound.setCurrentIndex(i)
 
     def position(self) -> float:
         return self.player.position() / 1000.0
@@ -191,12 +233,21 @@ class VideoPlayer(QWidget):
     # ------------------------------------------------------------ внутреннее
     def _apply_sound(self, *_):
         v = self.vol.value() / 100
-        mode = self.sound.currentIndex()
-        orig_on = mode == 0 and not self.stems and "original" not in self.muted_tracks
+        mode = self.sound_mode()
+        track = self.orig_track()
+        tracks = self.player.audioTracks()
+        if mode == "orig" and len(tracks) > 1 and track < len(tracks) \
+                and self.player.activeAudioTrack() != track:
+            self.player.setActiveAudioTrack(track)
+        # отделённые голоса и фон относятся только к основной дорожке
+        use_stems = bool(self.stems) and track == self.main_track
+        orig_on = mode == "orig" and not use_stems and not (
+            track == self.main_track and "original" in self.muted_tracks)
         self.audio.setVolume(v if orig_on else 0.0)
-        self.dub_audio.setVolume(v if mode == 1 else 0.0)
+        self.dub_audio.setVolume(v if mode == "dub" else 0.0)
         for key, (_pl, out) in self.stems.items():
-            out.setVolume(v if mode == 0 and key not in self.muted_tracks else 0.0)
+            out.setVolume(v if mode == "orig" and use_stems and key not in self.muted_tracks
+                          else 0.0)
         self._sync_dub(force=True)
 
     def _on_pos(self, ms: int):
@@ -227,7 +278,7 @@ class VideoPlayer(QWidget):
     def _sync_dub(self, force: bool = False):
         """Держим плеер превью (и дорожки голосов/фона) синхронно с видео."""
         self._sync_stems(force)
-        if self.dub.source().isEmpty() or self.sound.currentIndex() != 1:
+        if self.dub.source().isEmpty() or self.sound_mode() != "dub":
             if self.dub.playbackState() == QMediaPlayer.PlayingState:
                 self.dub.pause()
             return
@@ -244,7 +295,8 @@ class VideoPlayer(QWidget):
             self.dub.play()
 
     def _sync_stems(self, force: bool = False) -> None:
-        on = self.sound.currentIndex() == 0 and self.is_playing()
+        on = self.sound_mode() == "orig" and self.orig_track() == self.main_track \
+            and self.is_playing()
         pos = self.position()
         for key, (pl, _out) in self.stems.items():
             if not on or key in self.muted_tracks:

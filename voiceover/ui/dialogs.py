@@ -98,13 +98,7 @@ class NewProjectDialog(QDialog):
                               f"аудиодорожек: {len(self.info.audio)}, "
                               f"субтитров: {len(self.info.subtitles)}")
         for a in self.info.audio:
-            label = f"#{a.type_index + 1}: {a.codec}"
-            if a.language:
-                label += f" [{a.language}]"
-            if a.title:
-                label += f" «{a.title}»"
-            label += f" — {a.description[:40]}"
-            self.stream.addItem(label, a.type_index)
+            self.stream.addItem(f"#{a.type_index + 1}: {ffmpeg.track_label(a)}", a.type_index)
         # Если рядом лежат субтитры с тем же именем — подставим
         if not self.subs.text():
             base = Path(p)
@@ -375,8 +369,11 @@ class ExportDialog(QDialog):
         self.bitrate = QComboBox()
         self.bitrate.addItems(["128k", "192k", "256k", "320k", "384k", "448k", "640k"])
         self.bitrate.setCurrentText("256k")
-        self.keep_orig = QCheckBox("Оставить оригинальную дорожку (второй)")
+        self.keep_orig = QCheckBox("Оставить звук оригинала (после озвучки)")
         self.keep_orig.setChecked(True)
+        self.all_orig = QCheckBox("Все звуковые дорожки исходного видео (иначе — только основную)")
+        self.all_orig.setChecked(True)
+        self.keep_orig.toggled.connect(self.all_orig.setEnabled)
         self.keep_subs = QCheckBox("Сохранить субтитры из исходного видео")
         self.keep_subs.setChecked(True)
         self.title = QLineEdit("Многоголосая озвучка")
@@ -404,6 +401,7 @@ class ExportDialog(QDialog):
         f.addRow("Язык (ISO 639-2):", self.lang)
         f.addRow("Громкость:", self.loudness)
         f.addRow(self.keep_orig)
+        f.addRow(self.all_orig)
         f.addRow(self.keep_subs)
 
         # оформление: видео перекодируется (дольше, чем простая сборка)
@@ -454,6 +452,7 @@ class ExportDialog(QDialog):
         video = self.kind.currentData() == "video"
         for w in (self.container, self.keep_orig, self.keep_subs, self.brand):
             w.setEnabled(video)
+        self.all_orig.setEnabled(video and self.keep_orig.isChecked())
         self.bitrate.setEnabled(self.codec.currentData() != "flac")
         p = Path(self.out.text())
         if video:
@@ -478,6 +477,7 @@ class ExportDialog(QDialog):
             codec=self.codec.currentData(),
             bitrate=self.bitrate.currentText(),
             keep_original=self.keep_orig.isChecked(),
+            all_originals=self.all_orig.isChecked(),
             keep_subtitles=self.keep_subs.isChecked(),
             track_title=self.title.text().strip() or "Озвучка",
             language=(self.lang.text().strip() or "rus")[:3],
