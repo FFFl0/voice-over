@@ -340,6 +340,8 @@ class MainWindow(QMainWindow):
                             "Свести озвучку и сохранить видео с новой дорожкой")
         self.a_settings = act("Настройки…", self.open_settings, None, "settings")
         self.a_cleanup = act("Удалить неиспользуемые файлы…", self.cleanup_files)
+        self.a_backups = act("Восстановить из резервной копии…", self.restore_backup, None, None,
+                             "Вернуть проект к одной из автоматических копий")
         self.a_stems = act("Экспорт по дорожкам (для Reaper)…", self.export_stems, None, None,
                            "Голоса каждого персонажа, фон и микс отдельными WAV + проект Reaper")
         self.a_pkg_export = act("Пакет для актёра…", lambda: team_tools.export_package(self),
@@ -399,6 +401,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_undo)
         m.addAction(self.a_redo)
         m.addSeparator()
+        m.addAction(self.a_backups)
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
@@ -549,7 +552,7 @@ class MainWindow(QMainWindow):
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
                   self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems,
-                  self.a_diarize, self.a_script):
+                  self.a_diarize, self.a_script, self.a_backups):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -927,6 +930,11 @@ class MainWindow(QMainWindow):
             return self.save_project_as()
         self.flush_history()
         try:
+            from ..core.backup import make_backup
+            make_backup(self.project)
+        except Exception:  # noqa: BLE001  резервная копия не должна мешать сохранению
+            pass
+        try:
             self.project.save()
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
@@ -1125,6 +1133,57 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
+    def restore_backup(self):
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        from ..core.backup import list_backups, load_backup_state
+        p = self.project
+        if not p:
+            return
+        items = list_backups(p)
+        if not items:
+            QMessageBox.information(self, "Резервные копии",
+                                    "Копий пока нет. Они создаются автоматически при сохранении "
+                                    "проекта (не чаще раза в 5 минут, хранятся последние 30).")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Восстановить из резервной копии")
+        lay = QVBoxLayout(dlg)
+        lbl = QLabel("Выберите копию. Восстановление можно отменить (Ctrl+Z); записи актёров "
+                     "на диске не меняются.")
+        lbl.setWordWrap(True)
+        lay.addWidget(lbl)
+        lst = QListWidget()
+        for b in items:
+            it = QListWidgetItem(f"{b.when:%d.%m.%Y %H:%M:%S} — реплик: {b.lines}, "
+                                 f"записано: {b.recorded}")
+            it.setData(Qt.UserRole, str(b.path))
+            lst.addItem(it)
+        lst.setCurrentRow(0)
+        lay.addWidget(lst)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Восстановить")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lst.itemDoubleClicked.connect(lambda *_: dlg.accept())
+        lay.addWidget(bb)
+        dlg.resize(460, 420)
+        if dlg.exec() != QDialog.Accepted or lst.currentItem() is None:
+            return
+        try:
+            state = load_backup_state(lst.currentItem().data(Qt.UserRole))
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Резервные копии", f"Не удалось прочитать копию:\n{e}")
+            return
+        self.flush_history()
+        p.restore(state)
+        self.chars.reload()
+        self.refresh_all()
+        bg = p.resolve(p.background_wav)
+        self.mix_panel.set_mix(p.mix, bool(bg and bg.exists()))
+        self._apply_track_mutes()
+        self.mark_dirty("Восстановление из копии")
+        self.statusBar().showMessage("Проект восстановлен из копии — отменить: Ctrl+Z", 6000)
+
     def _open_batch(self):
         from .batch_dialog import open_batch
         open_batch(self)
