@@ -63,6 +63,11 @@ class Line:
     rec_path: str = ""
     rec_offset: float = 0.0  # смещение начала записи относительно start, сек
     gain_db: float = 0.0
+    # правка текущего дубля: обрезка начала/конца и плавные края, сек
+    trim_in: float = 0.0
+    trim_out: float = 0.0
+    fade_in: float = 0.0
+    fade_out: float = 0.0
     note: str = ""
     # Текст оригинала (до перевода) и его язык; пусто, если реплику не переводили
     orig_text: str = ""

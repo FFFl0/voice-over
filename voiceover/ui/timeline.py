@@ -47,6 +47,7 @@ class TimelineCanvas(QWidget):
         self.duration = 0.0
         self._mouse_x = 0.0
         self._autoscroll = QTimer(self, interval=16, timeout=self._autoscroll_tick)
+        self._rec_peaks: dict[str, tuple[float, np.ndarray]] = {}
         self.preview_range: Optional[tuple[float, float]] = None
         self._hover: Optional[str] = None
         self._drag: Optional[tuple] = None
@@ -137,6 +138,70 @@ class TimelineCanvas(QWidget):
         self.waves = [(k, peaks if k == key else pk) for k, pk in self.waves]
         self.peaks_rate = rate
         self.update()
+
+    REC_PEAKS_PER_SEC = 100
+
+    def rec_peaks(self, path) -> Optional[np.ndarray]:
+        """Пики записи для волны внутри блока (кэш по времени изменения файла)."""
+        import os
+        key = str(path)
+        try:
+            mtime = os.path.getmtime(key)
+        except OSError:
+            return None
+        c = self._rec_peaks.get(key)
+        if c and c[0] == mtime:
+            return c[1]
+        try:
+            import soundfile as sf
+            data, sr = sf.read(key, dtype="float32", always_2d=True)
+        except Exception:  # noqa: BLE001
+            return None
+        mono = np.abs(data).max(axis=1)
+        hop = max(1, sr // self.REC_PEAKS_PER_SEC)
+        n = len(mono) // hop
+        pk = mono[: n * hop].reshape(n, hop).max(axis=1) if n else np.zeros(0, np.float32)
+        top = float(pk.max()) if len(pk) else 0.0
+        pk = pk / top if top > 0 else pk
+        self._rec_peaks[key] = (mtime, pk)
+        return pk
+
+    def _draw_rec_wave(self, p: QPainter, ln, r: QRectF, color: QColor) -> None:
+        src = self.project.resolve(ln.rec_path) if (self.project and ln.rec_path) else None
+        if src is None:
+            return
+        pk = self.rec_peaks(src)
+        if pk is None or not len(pk):
+            return
+        rate = self.REC_PEAKS_PER_SEC
+        dur = len(pk) / rate
+        a = ln.trim_in
+        b = max(a, dur - ln.trim_out)
+        t0 = ln.start + ln.rec_offset   # начало файла на шкале фильма
+        xa = max(r.left(), self.x_of(t0 + a), LABEL_W)
+        xb = min(r.right(), self.x_of(t0 + b), self.width())
+        if xb - xa < 2:
+            return
+        mid = r.center().y()
+        amp = r.height() / 2 - 2
+        pen = QPen(color, 1)
+        p.setPen(pen)
+        x = xa
+        while x < xb:
+            t = self.t_of(x) - t0
+            i0 = int(t * rate)
+            i1 = max(i0 + 1, int((t + 2 / self.pps) * rate))
+            seg = pk[max(0, i0):min(len(pk), i1)]
+            if len(seg):
+                v = float(seg.max())
+                # фейды на волне — как они прозвучат
+                if ln.fade_in > 0:
+                    v *= min(1.0, max(0.0, (t - a) / ln.fade_in))
+                if ln.fade_out > 0:
+                    v *= min(1.0, max(0.0, (b - t) / ln.fade_out))
+                h = max(0.5, v * amp)
+                p.drawLine(QPointF(x, mid - h), QPointF(x, mid + h))
+            x += 2
 
     def set_muted(self, muted: set[str]) -> None:
         self.muted = set(muted)
@@ -272,6 +337,10 @@ class TimelineCanvas(QWidget):
                     p.setPen(QPen(QColor(th.text), 1))
                     p.drawPath(inner)
                 p.setRenderHint(QPainter.Antialiasing, False)
+                if ready and ln.enabled and r.width() > 8:
+                    wc = QColor(th.on_role)
+                    wc.setAlpha(70)
+                    self._draw_rec_wave(p, ln, r, wc)
                 if r.width() > 34:
                     p.setPen(QColor(th.on_role) if (ready and ln.enabled) else QColor(th.ink))
                     p.drawText(r.adjusted(8, 0, -6, 0), Qt.AlignVCenter | Qt.AlignLeft,

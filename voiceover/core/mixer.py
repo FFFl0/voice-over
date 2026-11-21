@@ -97,6 +97,9 @@ class Clip:
     start: float       # время начала в фильме, сек
     length: int        # длина в сэмплах
     gain: float        # итоговое линейное усиление
+    skip: int = 0      # сколько сэмплов файла пропустить (обрезка начала)
+    fade_in: int = 0   # плавное нарастание, сэмплов
+    fade_out: int = 0  # плавное затухание, сэмплов
 
     def end(self, sr: int) -> float:
         return self.start + self.length / sr
@@ -180,6 +183,12 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
         data, _ = sf.read(str(path), dtype="float32")
         if data.ndim > 1:
             data = data.mean(axis=1)
+        # обрезка дубля (файл в кэше не меняется — пропускаем при чтении)
+        skip = min(len(data), max(0, int(round(ln.trim_in * sr))))
+        tail = max(0, int(round(ln.trim_out * sr)))
+        data = data[skip: max(skip, len(data) - tail)]
+        if len(data) == 0:
+            continue
 
         # 3) громкость
         gain_db = ln.gain_db + project.mix.voices_db + (ch.volume_db if ch else 0.0)
@@ -187,7 +196,8 @@ def prepare_clips(project: Project, progress: Optional[ProgressCb] = None,
             r = active_rms(data, sr)
             if r > 0:
                 gain_db += float(np.clip(TARGET_RMS_DB - lin_to_db(r), -12, 18))
-        clips.append(Clip(ln.id, str(path), ln.start + offset, len(data), db_to_lin(gain_db)))
+        clips.append(Clip(ln.id, str(path), ln.start + offset + skip / sr, len(data),
+                          db_to_lin(gain_db), skip, int(ln.fade_in * sr), int(ln.fade_out * sr)))
     if progress:
         progress(1.0, "Реплики подготовлены")
     return clips, warnings
@@ -379,8 +389,16 @@ def render_mix(project: Project, clips: list[Clip], out_wav: str,
                         f = clip_files[c.path] = sf.SoundFile(c.path)
                     a = max(cs, pos)
                     b = min(ce, pos + n)
-                    f.seek(a - cs)
+                    f.seek(c.skip + a - cs)
                     d = f.read(b - a, dtype="float32", always_2d=True).mean(axis=1) * c.gain
+                    if c.fade_in or c.fade_out:
+                        j = np.arange(a - cs, a - cs + len(d), dtype=np.float32)
+                        g = np.ones(len(d), np.float32)
+                        if c.fade_in:
+                            g = np.minimum(g, (j + 1) / c.fade_in)
+                        if c.fade_out:
+                            g = np.minimum(g, (c.length - j) / c.fade_out)
+                        d = d * np.clip(g, 0, 1)
                     # короткие фейды на краях клипа против щелчков
                     fade = min(len(d) // 2, int(0.005 * sr))
                     if fade > 0 and a == cs:

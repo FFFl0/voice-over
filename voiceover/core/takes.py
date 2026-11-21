@@ -53,8 +53,15 @@ def remember_offset(line: Line) -> None:
 def select_take(line: Line, rel: str) -> None:
     """Сделать дубль текущим (пустая строка — реплика без записи)."""
     remember_offset(line)
+    if rel != line.rec_path:
+        reset_edits(line)
     line.rec_path = rel
     line.rec_offset = float(line.takes.get(rel, 0.0)) if rel else 0.0
+
+
+def reset_edits(line: Line) -> None:
+    """Обрезка и фейды относятся к конкретному дублю — у нового начинаются с нуля."""
+    line.trim_in = line.trim_out = line.fade_in = line.fade_out = 0.0
 
 
 def delete_take(project: Project, line: Line, rel: str) -> None:

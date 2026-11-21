@@ -16,7 +16,7 @@ from ..core.mixer import silence_bounds
 from ..core.models import Line, Project
 from ..core.recorder import Recorder, find_device, input_devices, sd_available
 from ..core.settings import AppSettings
-from ..core.takes import delete_take, list_takes, remember_offset, select_take
+from ..core.takes import delete_take, list_takes, remember_offset, reset_edits, select_take
 from . import theme
 from .video_player import VideoPlayer
 
@@ -117,6 +117,20 @@ class RecordPanel(QWidget):
         self.auto_align = QCheckBox("Подгонять к оригиналу после записи")
         self.auto_align.setChecked(settings.record_auto_align)
         self.auto_align.toggled.connect(lambda v: setattr(self.settings, "record_auto_align", v))
+        def spin(lo, hi, step, suffix, tip, dec=2):
+            s = QDoubleSpinBox()
+            s.setRange(lo, hi)
+            s.setSingleStep(step)
+            s.setDecimals(dec)
+            s.setSuffix(suffix)
+            s.setToolTip(tip)
+            s.valueChanged.connect(self._edits_changed)
+            return s
+        self.gain = spin(-24, 24, 0.5, " дБ", "Громкость этой реплики", 1)
+        self.trim_in = spin(0, 30, 0.05, " с", "Обрезать начало дубля")
+        self.trim_out = spin(0, 30, 0.05, " с", "Обрезать конец дубля")
+        self.fade_in = spin(0, 5, 0.05, " с", "Плавное нарастание в начале")
+        self.fade_out = spin(0, 5, 0.05, " с", "Плавное затухание в конце")
         self.take_box = QComboBox()
         self.take_box.setToolTip("Дубли реплики. Выбранный идёт в сведение; остальные хранятся, "
                                  "к ним можно вернуться. Слушать — P.")
@@ -148,6 +162,13 @@ class RecordPanel(QWidget):
         take.addWidget(self.offset)
         take.addWidget(self.btn_align)
 
+        edits = QHBoxLayout()
+        for lbl, w in (("Громкость:", self.gain), ("Обрезать:", self.trim_in), ("–", self.trim_out),
+                       ("Нарастание:", self.fade_in), ("Затухание:", self.fade_out)):
+            edits.addWidget(QLabel(lbl))
+            edits.addWidget(w)
+        edits.addStretch(1)
+
         card = QFrame()
         card.setObjectName("well")
         cl = QVBoxLayout(card)
@@ -176,6 +197,7 @@ class RecordPanel(QWidget):
         lay.addWidget(card)
         lay.addLayout(btns)
         lay.addLayout(take)
+        lay.addLayout(edits)
         lay.addStretch(1)
 
         self.btn_refresh.clicked.connect(self.refresh_devices)
@@ -283,6 +305,7 @@ class RecordPanel(QWidget):
         has_take = bool(has_line and self.line.rec_path and self.project
                         and self.project.resolve(self.line.rec_path).exists())
         self._fill_takes()
+        self._load_edits()
         self.btn_rec.setEnabled(has_line and not recording)
         self.btn_stop.setEnabled(recording)
         self.btn_play.setEnabled(has_take and not recording)
@@ -290,8 +313,29 @@ class RecordPanel(QWidget):
         self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
         self.offset.setEnabled(has_take and not recording)
         self.btn_align.setEnabled(has_take and not recording)
+        for w in (self.gain, self.trim_in, self.trim_out, self.fade_in, self.fade_out):
+            w.setEnabled(has_take and not recording)
         self.btn_prev.setEnabled(not recording)
         self.btn_next.setEnabled(not recording)
+
+    def _load_edits(self):
+        ln = self.line
+        for w, v in ((self.gain, ln.gain_db if ln else 0.0), (self.trim_in, ln.trim_in if ln else 0.0),
+                     (self.trim_out, ln.trim_out if ln else 0.0),
+                     (self.fade_in, ln.fade_in if ln else 0.0),
+                     (self.fade_out, ln.fade_out if ln else 0.0)):
+            w.blockSignals(True)
+            w.setValue(v)
+            w.blockSignals(False)
+
+    def _edits_changed(self, *_):
+        ln = self.line
+        if not ln:
+            return
+        ln.gain_db = self.gain.value()
+        ln.trim_in, ln.trim_out = self.trim_in.value(), self.trim_out.value()
+        ln.fade_in, ln.fade_out = self.fade_in.value(), self.fade_out.value()
+        self.recorded.emit(ln.id)
 
     def refresh_take(self) -> None:
         """Обновить сдвиг и список дублей (после изменения реплики снаружи)."""
@@ -378,6 +422,7 @@ class RecordPanel(QWidget):
             pass
         # Прежние дубли не удаляем: они остаются в списке «Дубль»
         remember_offset(ln)
+        reset_edits(ln)
         ln.rec_path = self.project.relative(Path(self._rec_path))
         ln.rec_offset = round(offset, 3)
         remember_offset(ln)

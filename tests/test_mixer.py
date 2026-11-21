@@ -214,3 +214,34 @@ def test_original_mute_without_stems(tmp_path):
     mixer.render_project(p, str(out))
     y, _ = sf.read(out)
     assert _level(y, 4, 5.5, 100) < 1e-3
+
+
+def test_trim_and_fades(tmp_path):
+    p = make_project(tmp_path)
+    ln = p.lines[0]                      # запись 2 с: 0.25 тишины + 1.5 тона + 0.25 тишины
+    ln.trim_in, ln.trim_out = 0.5, 0.5
+    ln.fade_in, ln.fade_out = 0.2, 0.2
+    p.mix.normalize_voices = False
+    clips, _ = mixer.prepare_clips(p)
+    c = clips[0]
+    assert abs(c.length / SR - 1.0) < 1e-3 and abs(c.start - 1.5) < 1e-6 and c.skip == SR // 2
+    out = tmp_path / "t.wav"
+    p.mix.duck_db = 0.0
+    mixer.render_project(p, str(out))
+    y, _ = sf.read(out)
+    v = y[:, 0] - y[0:1, 0] * 0          # фон 100 Гц мешает — смотрим полосу 800 Гц
+    def lvl(a, b):
+        seg = v[int(a * SR): int(b * SR)]
+        spec = np.abs(np.fft.rfft(seg)) * 2 / len(seg)
+        return float(spec[np.argmin(np.abs(np.fft.rfftfreq(len(seg), 1 / SR) - 800))])
+    assert lvl(1.0, 1.45) < 0.01                     # обрезанное начало не звучит
+    assert lvl(1.55, 1.65) < lvl(1.9, 2.0) * 0.8     # нарастание
+    assert lvl(1.9, 2.1) > 0.4                       # середина — полная громкость
+    assert lvl(2.55, 3.0) < 0.01                     # обрезанный конец
+
+
+def test_take_switch_resets_edits():
+    from voiceover.core.takes import select_take
+    ln = Line(0, 1, "x", rec_path="rec/a_1.wav", trim_in=0.3, fade_out=0.2)
+    select_take(ln, "rec/a_2.wav")
+    assert ln.trim_in == 0 and ln.fade_out == 0
