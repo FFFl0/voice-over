@@ -300,6 +300,7 @@ class MainWindow(QMainWindow):
         self.chars.listChanged.connect(self._on_chars_list_changed)
         self.chars.filterRequested.connect(self._filter_character)
         self.record.recorded.connect(lambda i: self._on_line_edited(i, "Запись реплики"))
+        self.record.alignRequested.connect(lambda i: self.align_recordings([i], quiet=False))
         self.record.requestLine.connect(self._step_line)
         self.record.playTake.connect(self._play_take)
 
@@ -348,6 +349,9 @@ class MainWindow(QMainWindow):
         self.a_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.a_separate = act("Отделить голоса", self.separate, None, "separate",
                               "Убрать оригинальные голоса, оставив музыку и звуки (Demucs)")
+        self.a_align = act("Подогнать записи к оригиналу", lambda: self.align_recordings(),
+                           "Ctrl+L", None, "Сдвинуть записи выделенных реплик так, чтобы слоги "
+                           "и паузы совпали с голосом оригинала")
         self.a_preview = act("Превью", lambda: self.build_preview(60), "F6", "preview",
                              "Свести минуту от курсора и слушать вместе с видео")
         self.a_preview_full = act("Превью всего фильма", lambda: self.build_preview(None), "Shift+F6")
@@ -386,7 +390,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
-        for a in (self.a_whisper, self.a_translate, self.a_restore, self.a_separate):
+        for a in (self.a_whisper, self.a_translate, self.a_restore, self.a_separate, self.a_align):
             m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_preview)
@@ -530,7 +534,7 @@ class MainWindow(QMainWindow):
                   self.a_export_srt, self.a_preview,
                   self.a_preview_full, self.a_separate, self.a_whisper,
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
-                  self.a_rec_send, self.a_rec_import):
+                  self.a_rec_send, self.a_rec_import, self.a_align):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -1103,6 +1107,45 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
+    def align_recordings(self, ids: Optional[list[str]] = None, quiet: bool = True):
+        """Подогнать сдвиг записей к голосу оригинала (выделенные реплики или ids)."""
+        from ..core.align import align_line, reference_path
+        p = self.project
+        if not p:
+            return
+        ref = reference_path(p)
+        if not ref or not ref.exists():
+            if not quiet:
+                self.statusBar().showMessage("Нет звука оригинала для подгонки", 5000)
+            return
+        lines = ([ln for ln in p.lines if ln.id in set(ids)] if ids is not None
+                 else [ln for ln in self.selected_lines() if ln.rec_path])
+        if ids is None and not lines:
+            self.statusBar().showMessage("Выделите реплики с записями", 4000)
+            return
+        moved, weak = 0, 0
+        for ln in lines:
+            r = align_line(p, ln)
+            if r is None:
+                continue
+            if r.applied:
+                moved += 1
+                self.lines_model.refresh_line(ln.id)
+            elif r.score < 0.3:
+                weak += 1
+        if moved:
+            self.timeline.canvas.update()
+            self.record.refresh_take()
+            self.mark_dirty("Подгонка к оригиналу")
+        if len(lines) == 1 and lines:
+            r_text = ("Запись подогнана к оригиналу" if moved else
+                      ("Не удалось уверенно сопоставить с оригиналом — сдвиг не менялся" if weak
+                       else "Запись уже совпадает с оригиналом"))
+        else:
+            r_text = f"Подогнано записей: {moved} из {len(lines)}" + (
+                f", не удалось сопоставить: {weak}" if weak else "")
+        self.statusBar().showMessage(r_text, 6000)
+
     def selected_lines(self) -> list[Line]:
         if not self.project:
             return []

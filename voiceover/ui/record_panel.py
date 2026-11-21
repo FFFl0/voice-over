@@ -25,6 +25,7 @@ class RecordPanel(QWidget):
     recorded = Signal(str)            # id реплики
     requestLine = Signal(int)         # перейти к соседней реплике: -1 / +1
     playTake = Signal(str)            # путь к файлу дубля
+    alignRequested = Signal(str)      # id реплики: подогнать запись к оригиналу
 
     def __init__(self, player: VideoPlayer, settings: AppSettings, parent=None):
         super().__init__(parent)
@@ -110,6 +111,12 @@ class RecordPanel(QWidget):
         self.offset.setDecimals(3)
         self.offset.setSuffix(" с")
         self.offset.setToolTip("Сдвиг записи относительно начала реплики (подгонка синхрона)")
+        self.btn_align = QPushButton(theme.icon("refresh"), " Подогнать")
+        self.btn_align.setToolTip("Подогнать сдвиг записи к голосу оригинала "
+                                  "(по слогам и паузам)")
+        self.auto_align = QCheckBox("Подгонять к оригиналу после записи")
+        self.auto_align.setChecked(settings.record_auto_align)
+        self.auto_align.toggled.connect(lambda v: setattr(self.settings, "record_auto_align", v))
         self.take_box = QComboBox()
         self.take_box.setToolTip("Дубли реплики. Выбранный идёт в сведение; остальные хранятся, "
                                  "к ним можно вернуться. Слушать — P.")
@@ -127,6 +134,7 @@ class RecordPanel(QWidget):
         opts.addWidget(self.auto_next)
         form.addRow(opts)
         form.addRow(self.mute_video)
+        form.addRow(self.auto_align)
 
         btns = QHBoxLayout()
         for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_next):
@@ -138,6 +146,7 @@ class RecordPanel(QWidget):
         take.addSpacing(12)
         take.addWidget(QLabel("Сдвиг:"))
         take.addWidget(self.offset)
+        take.addWidget(self.btn_align)
 
         card = QFrame()
         card.setObjectName("well")
@@ -179,6 +188,7 @@ class RecordPanel(QWidget):
         self.btn_next.clicked.connect(lambda: self.requestLine.emit(1))
         self.offset.valueChanged.connect(self._offset_changed)
         self.take_box.activated.connect(self._take_chosen)
+        self.btn_align.clicked.connect(lambda: self.line and self.alignRequested.emit(self.line.id))
         self.preroll.valueChanged.connect(lambda v: setattr(self.settings, "record_preroll", v))
 
         self.timer = QTimer(self, interval=50, timeout=self._tick)
@@ -279,8 +289,18 @@ class RecordPanel(QWidget):
         self.btn_del.setEnabled(has_take and not recording)
         self.take_box.setEnabled(self.take_box.count() > 1 and not recording)
         self.offset.setEnabled(has_take and not recording)
+        self.btn_align.setEnabled(has_take and not recording)
         self.btn_prev.setEnabled(not recording)
         self.btn_next.setEnabled(not recording)
+
+    def refresh_take(self) -> None:
+        """Обновить сдвиг и список дублей (после изменения реплики снаружи)."""
+        if self.line is None or self.is_recording():
+            return
+        self.offset.blockSignals(True)
+        self.offset.setValue(self.line.rec_offset)
+        self.offset.blockSignals(False)
+        self._update_buttons()
 
     def _fill_takes(self):
         import datetime
@@ -363,6 +383,8 @@ class RecordPanel(QWidget):
         remember_offset(ln)
         self.set_line(ln)
         self.recorded.emit(ln.id)
+        if self.auto_align.isChecked():
+            self.alignRequested.emit(ln.id)
         if self.auto_next.isChecked() and self.auto_stop.isChecked():
             self.requestLine.emit(1)
 
