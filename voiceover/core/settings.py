@@ -28,6 +28,7 @@ class AppSettings:
     demucs_device: str = "auto"     # auto | cuda | cpu
     theme: str = "dark"             # dark | light
     rythmo_band: bool = True        # ритмо-лента под видео
+    spell_lang: str = "ru"          # проверка орфографии: ru | en | uk | "" (выкл.)
     whisper_model: str = "large-v3-turbo"
     whisper_language: str = ""      # "" — автоопределение
     whisper_device: str = "auto"

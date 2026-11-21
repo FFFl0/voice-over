@@ -6,3 +6,5 @@ sounddevice>=0.4.6
 imageio-ffmpeg>=0.4.9
 # Перевод реплик (Google Переводчик / DeepL)
 requests>=2.28
+# Проверка орфографии (словари LibreOffice)
+spylls>=0.1.7

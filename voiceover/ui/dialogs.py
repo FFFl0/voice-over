@@ -484,6 +484,13 @@ class SettingsDialog(QDialog):
         f.addRow("Модель Demucs:", self.demucs_model)
         f.addRow("Устройство Demucs:", self.device)
         f.addRow("Запись после реплики:", self.postroll)
+        from .spell_ui import LANG_TITLES
+        self.spell = QComboBox()
+        for k in ("ru", "en", "uk", ""):
+            self.spell.addItem(LANG_TITLES[k].capitalize(), k)
+        self.spell.setCurrentIndex(max(0, self.spell.findData(s.spell_lang)))
+        self.spell.setToolTip("Словарь скачивается один раз (около 3 МБ)")
+        f.addRow("Проверка орфографии:", self.spell)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self._ok)
         bb.rejected.connect(self.reject)
@@ -507,6 +514,7 @@ class SettingsDialog(QDialog):
         self.s.demucs_model = self.demucs_model.currentData()
         self.s.demucs_device = self.device.currentData()
         self.s.record_postroll = self.postroll.value()
+        self.s.spell_lang = self.spell.currentData()
         self.s.save()
         self.accept()
 

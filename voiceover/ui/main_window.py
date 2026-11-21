@@ -178,6 +178,10 @@ class MainWindow(QMainWindow):
         self.text_edit = QPlainTextEdit()
         self.text_edit.setPlaceholderText("Текст выделенной реплики")
         self.text_edit.setMaximumHeight(72)
+        self.text_edit.setToolTip("Ударение — Ctrl+' после гласной. Пометки для актёра — в "
+                                  "скобках: (смеётся), [шёпотом]; они не произносятся.")
+        from .spell_ui import SpellSupport
+        self.spell = SpellSupport(self.text_edit, self.settings.spell_lang)
         self.orig_lbl = QLabel()
         self.orig_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.orig_lbl.setObjectName("muted")
@@ -650,6 +654,8 @@ class MainWindow(QMainWindow):
         self._update_now_line(self.player.position())
 
     def _fill_char_combos(self):
+        if self.project:   # имена персонажей — известные проверке орфографии слова
+            self.spell.set_known_words([c.name for c in self.project.characters])
         cur_f = self.f_char.currentData() if self.f_char.count() else "*"
         self.f_char.blockSignals(True)
         self.f_char.clear()
@@ -1696,15 +1702,20 @@ class MainWindow(QMainWindow):
 
     # ================================================================ прочее
     def open_settings(self):
+        lang = self.settings.spell_lang
         SettingsDialog(self.settings, self).exec()
         ffmpeg.set_ffmpeg_path(self.settings.ffmpeg_path)
+        if self.settings.spell_lang != lang:
+            self.spell.set_language(self.settings.spell_lang)
+            self._fill_char_combos()
 
     def about(self):
         QMessageBox.about(self, APP_NAME,
                           f"<b>{APP_NAME}</b> {__version__}<br>"
                           "Многоголосая озвучка фильмов, сериалов, мультфильмов и аниме.<br><br>"
-                          "Синтез: Edge TTS, Silero. Распознавание: Whisper (faster-whisper). "
-                          "Отделение голосов: Demucs. Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
+                          "Распознавание: Whisper (faster-whisper). Отделение голосов: Demucs. "
+                          "Голоса: WeSpeaker. Орфография: словари LibreOffice (spylls). "
+                          "Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
 
     def help(self):
         QMessageBox.information(self, "Как пользоваться", HELP_TEXT)

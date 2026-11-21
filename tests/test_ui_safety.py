@@ -42,7 +42,8 @@ def test_line_text_is_plain(win, tmp_path):
     assert win.now_lbl.textFormat() == Qt.PlainText and win.now_lbl.text() == HTML
     assert win.cue_who.textFormat() == Qt.PlainText
     win.select_line(p.lines[0].id)
-    assert win.record.prompt.textFormat() == Qt.PlainText
+    # суфлёр показывает пометки курсивом, но текст реплики экранирован
+    assert "<img" not in win.record.prompt.text() and "&lt;img" in win.record.prompt.text()
     tip = win.lines_model.data(win.lines_model.index(0, 4), Qt.ToolTipRole)
     assert "<img" not in tip and "&lt;img" in tip
 

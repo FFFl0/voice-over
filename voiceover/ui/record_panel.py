@@ -21,6 +21,20 @@ from . import theme
 from .video_player import VideoPlayer
 
 
+def prompt_html(text: str) -> str:
+    """Текст для суфлёра: пометки в скобках — приглушённым курсивом (их не произносят)."""
+    import html
+    import re
+    muted = theme.current().muted
+    out, pos = [], 0
+    for m in re.finditer(r"\([^)]*\)|\[[^\]]*\]", text):
+        out.append(html.escape(text[pos:m.start()]))
+        out.append(f'<span style="color:{muted}; font-style:italic">{html.escape(m.group())}</span>')
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    return "".join(out).replace("\n", "<br>")
+
+
 class RecordPanel(QWidget):
     recorded = Signal(str)            # id реплики
     requestLine = Signal(int)         # перейти к соседней реплике: -1 / +1
@@ -81,7 +95,7 @@ class RecordPanel(QWidget):
         self.note.setObjectName("muted")
         self.note.setWordWrap(True)
         self.prompt = QLabel("Выберите реплику в таблице")
-        self.prompt.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
+        self.prompt.setTextFormat(Qt.RichText)   # текст экранируется в prompt_html()
         self.prompt.setObjectName("promptText")
         self.prompt.setWordWrap(True)
         self.prompt.setMinimumHeight(110)
@@ -294,7 +308,7 @@ class RecordPanel(QWidget):
             self.length.setText(f"{ln.duration:.1f} с")
             self.note.setText(ln.note)
             self.note.setVisible(bool(ln.note))
-            self.prompt.setText(ln.text)
+            self.prompt.setText(prompt_html(ln.text))
             self.prev_lbl.setText(f"Перед этим: {prev_text}" if prev_text else "")
             self.next_lbl.setText(f"Дальше: {next_text}" if next_text else "")
             self.meter.setValue(0)
