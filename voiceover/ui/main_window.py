@@ -293,6 +293,8 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.lineSelected.connect(self._select_line_from_timeline)
         self.timeline.canvas.lineActivated.connect(self._play_line_video)
         self.timeline.canvas.muteToggled.connect(self.toggle_track_mute)
+        self.timeline.canvas.markerClicked.connect(self.edit_marker)
+        self.timeline.canvas.markerAddRequested.connect(self.add_marker)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.timeline.canvas.lineEdited.connect(lambda i: self._on_line_edited(i, "Изменение тайминга"))
         self.table.selectionModel().selectionChanged.connect(self._on_table_selection)
@@ -350,6 +352,10 @@ class MainWindow(QMainWindow):
                            "Разделить реплику в позиции курсора видео; запись делится вместе с ней")
         self.a_merge = act("Склеить выделенные реплики", self.merge_selected, "Ctrl+J", None,
                            "Объединить выделенные реплики одного персонажа в одну")
+        self.a_marker = act("Добавить метку…", lambda: self.add_marker(self.player.position()),
+                            None, None, "Заметка режиссёра к моменту фильма (клавиша M)")
+        self.a_marker_next = act("Следующая метка", lambda: self.goto_marker(1), "Alt+Right")
+        self.a_marker_prev = act("Предыдущая метка", lambda: self.goto_marker(-1), "Alt+Left")
         self.a_backups = act("Восстановить из резервной копии…", self.restore_backup, None, None,
                              "Вернуть проект к одной из автоматических копий")
         self.a_stems = act("Экспорт по дорожкам (для Reaper)…", self.export_stems, None, None,
@@ -417,6 +423,9 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_split)
         m.addAction(self.a_merge)
+        m.addSeparator()
+        for a in (self.a_marker, self.a_marker_next, self.a_marker_prev):
+            m.addAction(a)
         m.addSeparator()
         m.addAction(self.a_backups)
         m.addAction(self.a_cleanup)
@@ -575,7 +584,7 @@ class MainWindow(QMainWindow):
                   self.a_cleanup, self.a_translate, self.a_restore, self.a_pkg_export,
                   self.a_rec_send, self.a_rec_import, self.a_align, self.a_stems,
                   self.a_diarize, self.a_script, self.a_backups, self.a_split,
-                  self.a_merge):
+                  self.a_merge, self.a_marker, self.a_marker_next, self.a_marker_prev):
             a.setEnabled(has and not busy)
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
@@ -1541,6 +1550,69 @@ class MainWindow(QMainWindow):
         self.text_edit.setFocus()
         self.mark_dirty("Новая реплика")
 
+    # ------------------------------------------------------------ метки
+    def add_marker(self, t: float):
+        from ..core.models import add_marker
+        from .dialogs import ask_text
+        if not self.project:
+            return
+        text = ask_text(self, "Метка", f"Заметка к моменту {fmt_clock(t)}:")
+        if text is None:
+            return
+        add_marker(self.project, t, text or "метка")
+        self.timeline.canvas.update()
+        self.mark_dirty("Метка")
+
+    def edit_marker(self, marker_id: str):
+        p = self.project
+        m = next((x for x in p.markers if x["id"] == marker_id), None) if p else None
+        if m is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Метка {fmt_clock(m['t'])}")
+        lay = QVBoxLayout(dlg)
+        ed = QLineEdit(m["text"])
+        lay.addWidget(ed)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        b_go = bb.addButton("Перейти", QDialogButtonBox.ActionRole)
+        b_del = bb.addButton("Удалить", QDialogButtonBox.DestructiveRole)
+        result = {"act": ""}
+        b_go.clicked.connect(lambda: (result.update(act="go"), dlg.accept()))
+        b_del.clicked.connect(lambda: (result.update(act="del"), dlg.accept()))
+        bb.accepted.connect(lambda: (result.update(act="ok"), dlg.accept()))
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.resize(420, 100)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        if result["act"] == "del":
+            p.markers.remove(m)
+            self.mark_dirty("Удаление метки")
+        elif result["act"] == "go":
+            self.player.seek(m["t"])
+        elif ed.text().strip() != m["text"]:
+            m["text"] = ed.text().strip()
+            self.mark_dirty("Метка")
+        self.timeline.canvas.update()
+
+    def goto_marker(self, direction: int):
+        p = self.project
+        if not p or not p.markers:
+            self.statusBar().showMessage("Меток нет: двойной клик по линейке таймлайна или "
+                                         "клавиша M — поставить", 4000)
+            return
+        t = self.player.position()
+        ms = sorted(p.markers, key=lambda x: x["t"])
+        if direction > 0:
+            m = next((x for x in ms if x["t"] > t + 0.05), None)
+        else:
+            m = next((x for x in reversed(ms) if x["t"] < t - 0.05), None)
+        if m is None:
+            return
+        self.player.seek(m["t"])
+        self.timeline.canvas.ensure_visible(m["t"], m["t"])
+        self.statusBar().showMessage(f"Метка {fmt_clock(m['t'])}: {m['text']}", 6000)
+
     def split_current(self):
         from ..core.edit_ops import split_line
         p = self.project
@@ -1929,6 +2001,8 @@ class MainWindow(QMainWindow):
                 if fw is self.table and not mods:
                     return False
                 self.player.seek(self.player.position() + (-2 if action == "back" else 2))
+            elif action == "marker":
+                self.add_marker(self.player.position())
             elif action in ("prev_line", "next_line"):
                 if recording:
                     return False

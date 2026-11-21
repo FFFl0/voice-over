@@ -32,6 +32,8 @@ class TimelineCanvas(QWidget):
     lineEdited = Signal(str)         # тайминг изменён перетаскиванием
     viewChanged = Signal()
     muteToggled = Signal(str)        # ключ дорожки звука: original / vocals / background
+    markerClicked = Signal(str)      # id метки — изменить или удалить
+    markerAddRequested = Signal(float)   # двойной клик по линейке — новая метка
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -411,6 +413,37 @@ class TimelineCanvas(QWidget):
                 p.drawText(QRectF(LABEL_W - 52, y, 44, LANE_H), Qt.AlignVCenter | Qt.AlignRight,
                            "запись")
 
+        # метки режиссёра
+        if self.project and self.project.markers:
+            mc = QColor(th.warn)
+            line_c = QColor(mc)
+            line_c.setAlpha(110)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            for m in self.project.markers:
+                x = self.x_of(m["t"])
+                if x < LABEL_W or x > w:
+                    continue
+                p.setPen(QPen(line_c, 1, Qt.DashLine))
+                p.drawLine(QPointF(x, RULER_H), QPointF(x, h))
+                flag = QPainterPath(QPointF(x, 2))
+                flag.lineTo(QPointF(x + 11, 6))
+                flag.lineTo(QPointF(x, 10))
+                flag.closeSubpath()
+                p.setPen(QPen(mc, 1.5))
+                p.drawLine(QPointF(x, 2), QPointF(x, RULER_H))
+                p.fillPath(flag, mc)
+                if m.get("text"):   # короткая подпись под линейкой
+                    p.setFont(theme.body_font(theme.TEXT_SM - 1))
+                    fm2 = p.fontMetrics()
+                    label = fm2.elidedText(m["text"], Qt.ElideRight, 140)
+                    lr = QRectF(x + 3, RULER_H + 2, fm2.horizontalAdvance(label) + 8, 16)
+                    bg = QColor(th.paper)
+                    bg.setAlpha(210)
+                    p.fillRect(lr, bg)
+                    p.setPen(mc)
+                    p.drawText(lr.adjusted(4, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, label)
+            p.setRenderHint(QPainter.Antialiasing, False)
+
         # курсор
         x = self.x_of(self.playhead)
         if x >= LABEL_W:
@@ -436,6 +469,10 @@ class TimelineCanvas(QWidget):
                 self.muteToggled.emit(key)
                 return
         self._mouse_x = pos.x()
+        mk = self.marker_at(pos)
+        if mk is not None:
+            self.markerClicked.emit(mk["id"])
+            return
         if pos.y() < self.lanes_top or pos.x() < LABEL_W:
             self.seekRequested.emit(max(0.0, self.t_of(max(LABEL_W, pos.x()))))
             self._drag = ("seek",)
@@ -463,6 +500,13 @@ class TimelineCanvas(QWidget):
                 self.update()
             self.setCursor(Qt.SizeHorCursor if part in ("left", "right") else
                            (Qt.PointingHandCursor if ln else Qt.ArrowCursor))
+            mk = self.marker_at(pos)
+            if mk is not None:
+                from html import escape
+                self.setCursor(Qt.PointingHandCursor)
+                self.setToolTip(f"<b>Метка</b> {mk['t']:.2f} с<br>{escape(mk['text'])}<br>"
+                                "<i>Щёлкните, чтобы изменить или удалить</i>")
+                return
             on_mute = any(self.mute_rect(i).contains(pos) for i in range(len(self.waves)))
             if on_mute:
                 self.setCursor(Qt.PointingHandCursor)
@@ -558,7 +602,19 @@ class TimelineCanvas(QWidget):
             self.lineEdited.emit(ln.id)
         self._drag = None
 
+    def marker_at(self, pos: QPointF):
+        if not self.project or pos.y() > RULER_H:
+            return None
+        for m in self.project.markers:
+            if abs(self.x_of(m["t"]) + 4 - pos.x()) <= 8:
+                return m
+        return None
+
     def mouseDoubleClickEvent(self, e):
+        pos = e.position()
+        if pos.y() < RULER_H and pos.x() >= LABEL_W and self.marker_at(pos) is None:
+            self.markerAddRequested.emit(max(0.0, self.t_of(pos.x())))
+            return
         ln, _ = self.hit(e.position())
         if ln is not None:
             self.lineActivated.emit(ln.id)

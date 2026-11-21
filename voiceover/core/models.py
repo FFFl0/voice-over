@@ -136,6 +136,8 @@ class Project:
     background_wav: str = ""      # фон без голосов (Demucs)
     # Пакет для актёра: {"characters": [id…], "source": имя проекта}; пусто — обычный проект
     package: dict = field(default_factory=dict)
+    # Метки режиссёра на таймлайне: [{"id", "t", "text"}]
+    markers: list = field(default_factory=list)
     path: str = ""                # где сохранён .vop (не сериализуется)
 
     # ---------- персонажи ----------
@@ -211,6 +213,7 @@ class Project:
             "background_wav": self.background_wav,
             "mix": self.mix.to_dict(),
             "package": self.package,
+            "markers": self.markers,
             "characters": [c.to_dict() for c in self.characters],
             "lines": [ln.to_dict() for ln in self.lines],
         }
@@ -226,6 +229,7 @@ class Project:
             background_wav=d.get("background_wav", ""),
             mix=MixSettings.from_dict(d.get("mix", {})),
             package=dict(d.get("package") or {}),
+            markers=[dict(m) for m in d.get("markers") or [] if isinstance(m, dict)],
             characters=[Character.from_dict(c) for c in d.get("characters", [])],
             lines=[Line.from_dict(x) for x in d.get("lines", [])],
         )
@@ -237,6 +241,7 @@ class Project:
             "mix": self.mix.to_dict(),
             "characters": [c.to_dict() for c in self.characters],
             "lines": [ln.to_dict() for ln in self.lines],
+            "markers": [dict(m) for m in self.markers],
         }
 
     def restore(self, state: dict) -> None:
@@ -246,6 +251,7 @@ class Project:
             setattr(self.mix, k, getattr(new_mix, k))
         self.characters = [Character.from_dict(c) for c in state["characters"]]
         self.lines = [Line.from_dict(x) for x in state["lines"]]
+        self.markers = [dict(m) for m in state.get("markers", [])]
 
     def save(self, path: Optional[str] = None) -> None:
         if path:
@@ -273,3 +279,10 @@ def line_status(project: Project, line: Line) -> str:
         return "nochar"
     p = project.resolve(line.rec_path)
     return "rec" if p and p.exists() else "none"
+
+
+def add_marker(project: "Project", t: float, text: str) -> dict:
+    m = {"id": new_id(), "t": round(max(0.0, t), 3), "text": text.strip()}
+    project.markers.append(m)
+    project.markers.sort(key=lambda x: x["t"])
+    return m
