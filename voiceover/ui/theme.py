@@ -252,6 +252,11 @@ QPushButton[primary="true"]:hover {{ background: {t.focus}; border-color: {t.foc
 QPushButton[primary="true"]:focus {{ border-color: {t.ink}; }}
 QPushButton[primary="true"]:disabled {{ background: {t.paper3}; color: {t.muted}; border-color: {t.paper3}; }}
 QPushButton[danger="true"] {{ color: {t.error}; }}
+QPushButton#recButton {{ min-height: 40px; font-size: {TEXT_LG}pt; font-weight: 600; }}
+QPushButton#recButton[recording="true"] {{ background: {t.error}; color: {t.paper}; border-color: {t.error}; }}
+QPushButton#recButton[recording="true"][blink="true"] {{ background: {t.paper3}; color: {t.error}; }}
+QToolButton#optsToggle {{ border: 0; color: {t.muted}; padding: 2px 0; }}
+QToolButton#optsToggle:hover {{ color: {t.ink}; }}
 QPushButton[quiet="true"] {{ border-color: transparent; }}
 QPushButton[quiet="true"]:hover {{ background: {t.paper3}; }}
 
@@ -349,7 +354,7 @@ QLabel#h2 {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT
 QLabel#itemTitle {{ font-weight: 500; font-size: {TEXT_LG}pt; }}
 QLabel#cueText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_2XL}pt; color: {t.ink}; }}
 QLabel#cueWho {{ font-weight: 500; font-size: {TEXT_SM}pt; }}
-QLabel#promptText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_3XL}pt; padding: 18px 4px; }}
+QLabel#promptText {{ font-family: "{t.font_display}"; font-weight: 300; font-size: {TEXT_3XL * 1.25:.1f}pt; padding: 12px 4px; }}
 QLabel#countdown {{ font-weight: 500; font-size: {TEXT_LG}pt; }}
 QFrame#cue {{ background: {t.paper}; border-top: 1px solid {t.rule}; }}
 QFrame#well {{ background: {t.paper3}; border-radius: {RADIUS_MD}px; }}

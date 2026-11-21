@@ -10,7 +10,7 @@ import soundfile as sf
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame,
                                QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QToolButton, QVBoxLayout, QWidget)
 
 from ..core.mixer import silence_bounds
 from ..core.models import Line, Project
@@ -60,11 +60,8 @@ class RecordPanel(QWidget):
         self.btn_refresh = QPushButton(theme.icon("refresh"), "")
         self.btn_refresh.setFixedWidth(40)
         self.btn_refresh.setToolTip("Обновить список устройств")
-        self.level = QProgressBar()
-        self.level.setRange(0, 100)
-        self.level.setTextVisible(False)
-        self.level.setFixedHeight(8)
-        self.level.setObjectName("level")
+        from .level_meter import LevelMeter
+        self.level = LevelMeter()
         self.preroll = QDoubleSpinBox()
         self.preroll.setRange(0, 10)
         self.preroll.setSuffix(" с")
@@ -117,6 +114,8 @@ class RecordPanel(QWidget):
 
         self.btn_rec = QPushButton(theme.icon("record", theme.current().danger), " Записать (R)")
         self.btn_rec.setProperty("danger", True)
+        self.btn_rec.setObjectName("recButton")
+        self._blink = QTimer(self, interval=500, timeout=self._blink_rec)
         self.btn_stop = QPushButton(theme.icon("stop"), " Стоп")
         self.btn_play = QPushButton(theme.icon("headphones"), " Дубль")
         self.btn_play.setToolTip("Прослушать запись вместе с видео")
@@ -163,18 +162,39 @@ class RecordPanel(QWidget):
         dev_row.addWidget(self.btn_refresh)
         form.addRow("Микрофон:", dev_row)
         form.addRow("Уровень:", self.level)
-        form.addRow("Преролл:", self.preroll)
+        # редко меняемые настройки — в сворачиваемом блоке
+        self.opts_toggle = QToolButton()
+        self.opts_toggle.setObjectName("optsToggle")
+        self.opts_toggle.setCheckable(True)
+        self.opts_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.opts_box = QWidget()
+        of = QFormLayout(self.opts_box)
+        of.setContentsMargins(0, 0, 0, 0)
+        of.addRow("Преролл:", self.preroll)
         opts = QHBoxLayout()
         opts.addWidget(self.auto_stop)
         opts.addWidget(self.auto_next)
         opts.addWidget(self.loop)
-        form.addRow(opts)
-        form.addRow(self.mute_video)
-        form.addRow(self.auto_align)
+        opts.addStretch(1)
+        of.addRow(opts)
+        opts2 = QHBoxLayout()
+        opts2.addWidget(self.mute_video)
+        opts2.addWidget(self.auto_align)
+        opts2.addStretch(1)
+        of.addRow(opts2)
+        form.addRow(self.opts_toggle)
+        form.addRow(self.opts_box)
+        self.opts_toggle.toggled.connect(self._toggle_opts)
+        for cb in (self.auto_stop, self.auto_next, self.loop, self.mute_video, self.auto_align):
+            cb.toggled.connect(self._opts_summary)
+        self.preroll.valueChanged.connect(self._opts_summary)
+        self.opts_toggle.setChecked(settings.record_opts_open)
+        self._toggle_opts(settings.record_opts_open)
 
         btns = QHBoxLayout()
         for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_next):
-            btns.addWidget(b)
+            b.setMinimumHeight(40)
+            btns.addWidget(b, 2 if b is self.btn_rec else 1)
         take = QHBoxLayout()
         take.addWidget(QLabel("Дубль:"))
         take.addWidget(self.take_box, 1)
@@ -231,7 +251,7 @@ class RecordPanel(QWidget):
 
         self.btn_refresh.clicked.connect(self.refresh_devices)
         self.device.currentIndexChanged.connect(self._device_changed)
-        self.btn_rec.clicked.connect(self.start_recording)
+        self.btn_rec.clicked.connect(self._rec_clicked)
         self.btn_stop.clicked.connect(lambda: self.stop_recording(manual=True))
         self.btn_play.clicked.connect(self._play_take)
         self.btn_del.clicked.connect(self._delete_take)
@@ -337,7 +357,7 @@ class RecordPanel(QWidget):
                         and self.project.resolve(self.line.rec_path).exists())
         self._fill_takes()
         self._load_edits()
-        self.btn_rec.setEnabled(has_line and not recording)
+        self.btn_rec.setEnabled(has_line or recording)
         self.btn_stop.setEnabled(recording)
         self.btn_play.setEnabled(has_take and not recording)
         self.btn_del.setEnabled(has_take and not recording)
@@ -443,6 +463,7 @@ class RecordPanel(QWidget):
         self.player.play()
         self._rec_t0 = time.monotonic()
         self.timer.start()
+        self._set_recording_look(True)
         self._update_buttons()
 
     def stop_recording(self, manual: bool = False):
@@ -454,6 +475,7 @@ class RecordPanel(QWidget):
         if not self.rec or not self.rec.recording:
             return
         self.rec.stop()
+        self._set_recording_look(False)
         self.player.pause()
         self.player.set_muted(False)
         self.countdown.setText("")
@@ -491,6 +513,47 @@ class RecordPanel(QWidget):
         elif self.auto_next.isChecked() and self.auto_stop.isChecked():
             self.requestLine.emit(1)
 
+    def _rec_clicked(self):
+        if self.is_recording():
+            self.stop_recording(manual=True)
+        else:
+            self.start_recording()
+
+    def _toggle_opts(self, on: bool) -> None:
+        self.opts_box.setVisible(on)
+        self.opts_toggle.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
+        self.settings.record_opts_open = on
+        self._opts_summary()
+
+    def _opts_summary(self, *_):
+        parts = [f"преролл {self.preroll.value():g} с"]
+        if self.auto_stop.isChecked():
+            parts.append("автостоп")
+        if self.loop.isChecked():
+            parts.append("по кругу")
+        elif self.auto_next.isChecked() and self.auto_stop.isChecked():
+            parts.append("затем следующая")
+        if self.mute_video.isChecked():
+            parts.append("без звука видео")
+        if self.auto_align.isChecked():
+            parts.append("подгонка")
+        title = "Настройки записи"
+        self.opts_toggle.setText(title if self.opts_box.isVisible() or self.opts_toggle.isChecked()
+                                 else f"{title}: " + ", ".join(parts))
+
+    def _set_recording_look(self, on: bool) -> None:
+        self.btn_rec.setProperty("recording", on)
+        self.btn_rec.setProperty("blink", False)
+        self.btn_rec.setText(" Идёт запись…" if on else " Записать (R)")
+        (self._blink.start if on else self._blink.stop)()
+        self.btn_rec.style().unpolish(self.btn_rec)
+        self.btn_rec.style().polish(self.btn_rec)
+
+    def _blink_rec(self):
+        self.btn_rec.setProperty("blink", not self.btn_rec.property("blink"))
+        self.btn_rec.style().unpolish(self.btn_rec)
+        self.btn_rec.style().polish(self.btn_rec)
+
     def _loop_again(self):
         if not self.loop_pending:
             return
@@ -501,7 +564,7 @@ class RecordPanel(QWidget):
 
     def _tick(self):
         if self.rec:
-            self.level.setValue(int(min(1.0, self.rec.level * 1.2) * 100))
+            self.level.set_level(self.rec.level)
         if not (self.rec and self.rec.recording and self.line):
             return
         t = self.player.position()

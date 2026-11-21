@@ -23,6 +23,7 @@ class AppSettings:
     record_preroll: float = 2.0     # сек видео перед репликой при записи
     record_postroll: float = 1.0
     record_countdown: bool = True
+    record_opts_open: bool = False  # раскрыты ли «Настройки записи»
     record_auto_align: bool = True  # подгонять запись к оригиналу сразу после записи
     demucs_model: str = "htdemucs"
     demucs_device: str = "auto"     # auto | cuda | cpu
