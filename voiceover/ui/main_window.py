@@ -359,6 +359,8 @@ class MainWindow(QMainWindow):
                               "Убрать оригинальные голоса, оставив музыку и звуки (Demucs)")
         self.a_diarize = act("Роли по голосам…", self.diarize_roles, None, "users",
                              "Разложить реплики по персонажам по звучанию голоса")
+        self.a_batch = act("Пакетная обработка серий…", self._open_batch, None, None,
+                           "Извлечь звук, отделить голоса и экспортировать несколько серий подряд")
         self.a_align = act("Подогнать записи к оригиналу", lambda: self.align_recordings(),
                            "Ctrl+L", None, "Сдвинуть записи выделенных реплик так, чтобы слоги "
                            "и паузы совпали с голосом оригинала")
@@ -403,6 +405,7 @@ class MainWindow(QMainWindow):
         for a in (self.a_whisper, self.a_diarize, self.a_translate, self.a_restore, self.a_separate,
                   self.a_align):
             m.addAction(a)
+        m.addAction(self.a_batch)
         m.addSeparator()
         m.addAction(self.a_preview)
         m.addAction(self.a_preview_full)
@@ -551,6 +554,7 @@ class MainWindow(QMainWindow):
         self.a_new.setEnabled(not busy)
         self.a_open.setEnabled(not busy)
         self.a_pkg_open.setEnabled(not busy)
+        self.a_batch.setEnabled(not busy)
         self._update_undo_actions()
 
     def _update_undo_actions(self):
@@ -1121,6 +1125,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Субтитры сохранены ({len(items)} реплик): {out}", 8000)
 
     # ================================================================ реплики
+    def _open_batch(self):
+        from .batch_dialog import open_batch
+        open_batch(self)
+
     def diarize_roles(self):
         p = self.project
         if not p:
