@@ -91,7 +91,8 @@ class LinesModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return COLS[section]
+            from ..i18n import tr
+            return tr(COLS[section])
         return None
 
     def flags(self, index):

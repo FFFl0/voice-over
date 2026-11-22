@@ -635,8 +635,15 @@ class SettingsDialog(QDialog):
             lbl.setObjectName("itemTitle")
             f.addRow(lbl)
 
+        from .. import i18n
+        self.ui_lang = QComboBox()
+        for code, name in i18n.LANGUAGES.items():
+            self.ui_lang.addItem(i18n.NoTr(name), code)   # название языка — на нём самом
+        self.ui_lang.setCurrentIndex(max(0, self.ui_lang.findData(s.ui_lang or i18n.current())))
+
         f = QFormLayout()
         section("Внешний вид")
+        f.addRow("Язык интерфейса:", self.ui_lang)
         f.addRow("Тема:", self.theme_box)
         f.addRow(self.rythmo)
         f.addRow("Клавиши:", self.hotkeys_btn)
@@ -683,6 +690,7 @@ class SettingsDialog(QDialog):
         self.s.export_loudness = self.loudness.currentData()
         self.s.rythmo_band = self.rythmo.isChecked()
         self.new_theme = self.theme_box.currentData()
+        self.s.ui_lang = self.ui_lang.currentData()
         self.s.save()
         self.accept()
 

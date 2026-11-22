@@ -28,6 +28,7 @@ class AppSettings:
     demucs_model: str = "htdemucs"
     demucs_device: str = "auto"     # auto | cuda | cpu
     theme: str = "dark"             # dark | light
+    ui_lang: str = ""               # язык интерфейса: ru | en | uk ("" — как в системе)
     rythmo_band: bool = True        # ритмо-лента под видео
     tips_shown: bool = False        # первые подсказки уже показаны
     spell_lang: str = "ru"          # проверка орфографии: ru | en | uk | "" (выкл.)

@@ -120,12 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
     app = QApplication(argv)
-    install_russian(app)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("VoiceOverStudio")
     from .ui import theme
 
     settings = AppSettings.load()
+    from . import i18n
+    from .ui import i18n_qt
+    i18n_qt.install(app, settings.ui_lang or i18n.auto_language())
     theme.apply_theme(app, settings.theme)
     app.setWindowIcon(theme.app_icon())
     win = MainWindow(settings)

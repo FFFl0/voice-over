@@ -2356,6 +2356,11 @@ class MainWindow(QMainWindow):
         if dlg.exec() and getattr(dlg, "new_theme", None):
             if dlg.new_theme != self.settings.theme:
                 self.set_theme(dlg.new_theme)
+            from .. import i18n
+            if self.settings.ui_lang and self.settings.ui_lang != i18n.current():
+                from . import i18n_qt
+                i18n_qt.set_language(self.settings.ui_lang)
+                self.refresh_all()
             self.a_rythmo.setChecked(self.settings.rythmo_band)
         ffmpeg.set_ffmpeg_path(self.settings.ffmpeg_path)
         if self.settings.spell_lang != lang:

@@ -30,13 +30,8 @@ def color_icon(color: str) -> QIcon:
 
 def lines_word(n: int) -> str:
     """«1 реплика», «3 реплики», «5 реплик»."""
-    if n % 10 == 1 and n % 100 != 11:
-        w = "реплика"
-    elif n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
-        w = "реплики"
-    else:
-        w = "реплик"
-    return f"{n} {w}"
+    from ..i18n import NoTr, plural
+    return NoTr(f"{n} {plural(n, 'реплика', 'реплики', 'реплик')}")
 
 
 def prepare_new_character(project: Project, c: Character) -> None:
