@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+from ..i18n import plural, tr
 from .models import DONE_STATUSES, Project, line_status
 from .rythmo import spoken_text
 from .subtitles import fmt_clock
@@ -42,7 +43,7 @@ def _text_html(text: str) -> str:
 
 def build_html(project: Project, character_ids: Iterable[str]) -> str:
     cids = list(character_ids)
-    title = Path(project.path).stem if project.path else "Проект"
+    title = Path(project.path).stem if project.path else tr("Проект")
     numbers = {ln.id: i + 1 for i, ln in enumerate(project.lines)}
     st = {s["id"]: s for s in stats(project)}
     css = ("body{font-family:sans-serif;font-size:10pt;color:#111}"
@@ -53,17 +54,18 @@ def build_html(project: Project, character_ids: Iterable[str]) -> str:
            ".m{color:#666;font-size:9pt}.c{text-align:center}")
     out = [f"<html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
            f"<style>{css}</style></head><body>",
-           f"<h1>{html.escape(title)} — сценарий озвучки</h1>",
+           f"<h1>{html.escape(title)} — {tr('сценарий озвучки')}</h1>",
            f"<p class='m'>{datetime.date.today():%d.%m.%Y}. "
-           f"Пометки в скобках не произносятся. Знак ́ — ударение.</p>",
-           "<table width='100%' cellspacing='0'><tr><th>Персонаж</th><th>Актёр</th><th>Реплик</th><th>Слов</th>"
-           "<th>Записано</th></tr>"]
+           f"{tr('Пометки в скобках не произносятся. Знак ́ — ударение.')}</p>",
+           "<table width='100%' cellspacing='0'><tr>"
+           + "".join(f"<th>{tr(h)}</th>" for h in ("Персонаж", "Актёр", "Реплик", "Слов", "Записано"))
+           + "</tr>"]
     for cid in cids:
         s = st.get(cid)
         if s:
             out.append(f"<tr><td>{html.escape(s['name'])}</td><td>{html.escape(s['actor'])}</td>"
                        f"<td>{s['lines']}</td><td>{s['words']}</td>"
-                       f"<td>{s['recorded']} из {s['lines']}</td></tr>")
+                       f"<td>{s['recorded']} {tr('из')} {s['lines']}</td></tr>")
     out.append("</table>")
     for cid in cids:
         c = project.character(cid)
@@ -73,14 +75,17 @@ def build_html(project: Project, character_ids: Iterable[str]) -> str:
         out.append("<div style='page-break-before:always'></div>")
         actor = f" — {html.escape(c.actor)}" if c.actor else ""
         out.append(f"<h2>{html.escape(c.name)}{actor}</h2>"
-                   f"<p class='m'>{len(lines)} реплик, {st[cid]['words']} слов</p>")
-        out.append("<table width='100%' cellspacing='0'><tr><th width='5%'>№</th><th width='13%'>Время</th><th width='55%'>Текст</th><th>Заметка</th>"
+                   f"<p class='m'>{len(lines)} {plural(len(lines), 'реплика', 'реплики', 'реплик')}, "
+                   f"{st[cid]['words']} {plural(st[cid]['words'], 'слово', 'слова', 'слов')}</p>")
+        out.append(f"<table width='100%' cellspacing='0'><tr><th width='5%'>№</th>"
+                   f"<th width='13%'>{tr('Время')}</th><th width='55%'>{tr('Текст')}</th>"
+                   f"<th>{tr('Заметка')}</th>"
                    "<th width='4%'>✓</th></tr>")
         for ln in lines:
             status = line_status(project, ln)
             done = "✓" if status in DONE_STATUSES else ("↺" if status == "redo" else "")
             if status == "redo":
-                ln_note = "Переписать" + (f": {ln.review_note}" if ln.review_note else "")
+                ln_note = tr("Переписать") + (f": {ln.review_note}" if ln.review_note else "")
                 ln = type(ln)(**{**ln.to_dict(), "note": "; ".join(x for x in (ln_note, ln.note) if x)})
             orig = (f"<br><span class='m'>{html.escape(ln.orig_text)}</span>"
                     if ln.orig_text else "")

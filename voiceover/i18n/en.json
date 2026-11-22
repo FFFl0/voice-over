@@ -869,5 +869,16 @@
  "Все файлы (*)": "All files (*)",
  "Используется: {}": "In use: {}",
  "Настройки записи: {}": "Recording settings: {}",
- "Язык интерфейса:": "Interface language:"
+ "Язык интерфейса:": "Interface language:",
+ "сценарий озвучки": "dubbing script",
+ "Пометки в скобках не произносятся. Знак ́ — ударение.": "Notes in brackets are not spoken. The ́ mark shows stress.",
+ "Актёр": "Actor",
+ "Реплик": "Lines",
+ "Слов": "Words",
+ "Записано": "Recorded",
+ "из": "of",
+ "слово": "word",
+ "слова": "words",
+ "слов": "words",
+ "Время": "Time"
 }

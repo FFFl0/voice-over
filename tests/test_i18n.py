@@ -79,3 +79,23 @@ def test_window_switches_language(tmp_path, monkeypatch):
     finally:
         i18n_qt.set_language("ru")
     del app
+
+
+def test_script_follows_interface_language():
+    from voiceover.core.models import Line, Project
+    from voiceover.core.script import build_html
+    p = Project(video_path="v.mp4", duration=10)
+    c = p.add_character("Наруто")
+    p.lines.append(Line(1, 2, "Привет", c.id))
+    p.lines.append(Line(3, 4, "Пока", c.id))
+    try:
+        i18n.set_language("en")
+        h = build_html(p, [c.id])
+        assert "dubbing script" in h and "<th>Character</th>" in h and "2 lines, 2 words" in h
+        assert "Наруто" in h and "Привет" in h                       # данные — как есть
+        assert "сценарий" not in h and "Персонаж" not in h
+        i18n.set_language("uk")
+        assert "сценарій озвучення" in build_html(p, [c.id])
+    finally:
+        i18n.set_language("ru")
+    assert "сценарий озвучки" in build_html(p, [c.id])
