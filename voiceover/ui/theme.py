@@ -504,14 +504,14 @@ def icon(name: str, color: str | None = None, size: int = 20) -> QIcon:
 
 
 def app_icon() -> QIcon:
-    """Значок: квадрат полночного синего, азурная звуковая волна над строкой реплики."""
-    m = MIDNIGHT
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-           f'<rect width="64" height="64" rx="10" fill="{m.paper}"/>'
-           f'<g stroke="{m.accent}" stroke-width="4" stroke-linecap="square">'
-           f'<path d="M14 26v8M22 18v24M30 12v36M38 20v20M46 24v12"/></g>'
-           f'<path d="M14 54h36" stroke="{m.ink}" stroke-width="3"/></svg>')
+    """Значок программы: микрофон с кнопкой воспроизведения и звуковой волной
+    (assets/icon.png; в сборке .exe — icon.ico)."""
+    from pathlib import Path
+    from PySide6.QtGui import QPixmap
+    png = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
     ic = QIcon()
-    for s in (16, 32, 48, 64, 128, 256):
-        ic.addPixmap(_render_svg(svg, s))
+    pm = QPixmap(str(png))
+    if not pm.isNull():
+        for s in (16, 24, 32, 48, 64, 128, 256, 512):
+            ic.addPixmap(pm.scaled(s, s, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     return ic

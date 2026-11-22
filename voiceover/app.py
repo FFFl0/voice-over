@@ -112,6 +112,13 @@ def main(argv: list[str] | None = None) -> int:
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    if sys.platform == "win32":
+        # своя «группа» на панели задач: иначе Windows показывает значок python.exe
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VoiceOverStudio.App")
+        except Exception:  # noqa: BLE001
+            pass
     app = QApplication(argv)
     install_russian(app)
     app.setApplicationName(APP_NAME)

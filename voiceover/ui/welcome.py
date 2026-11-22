@@ -185,7 +185,7 @@ class WelcomePage(QWidget):
 
     def apply_icons(self):
         t = theme.current()
-        self.logo.setPixmap(theme.app_icon().pixmap(QSize(72, 72)))
+        self.logo.setPixmap(theme.app_icon().pixmap(QSize(104, 104)))
         self.btn_new.setIcon(theme.icon("plus", t.accent_ink))
         self.btn_open.setIcon(theme.icon("open"))
         for lbl in self._step_cards:
