@@ -53,7 +53,16 @@ class MainWindow(QMainWindow):
         self._restoring = False
 
         self.setWindowIcon(theme.app_icon())
-        self.resize(1560, 940)
+        # стартовый размер — не больше экрана (на ноутбуке окно не должно уходить за край)
+        from PySide6.QtGui import QGuiApplication
+        scr = QGuiApplication.primaryScreen()
+        avail = scr.availableGeometry() if scr else None
+        if avail is not None and (avail.width() < 1600 or avail.height() < 980):
+            self.resize(min(1560, avail.width() - 20), min(940, avail.height() - 40))
+            self._start_maximized = True
+        else:
+            self.resize(1560, 940)
+            self._start_maximized = False
         self._build_ui()
         self.actor_win = None   # окно актёра (Ctrl+Shift+A)
         self._extents: dict = {}   # где звучала реплика при сборке превью
@@ -89,7 +98,7 @@ class MainWindow(QMainWindow):
         self.now_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML
         self.now_lbl.setObjectName("cueText")
         self.now_lbl.setWordWrap(True)
-        self.now_lbl.setMinimumHeight(56)
+        self.now_lbl.setMinimumHeight(36)
         self.now_lbl.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         nl = QVBoxLayout(self.now_bar)
         nl.setContentsMargins(20, 12, 20, 14)
@@ -166,7 +175,7 @@ class MainWindow(QMainWindow):
         self.b_add.clicked.connect(self.add_line)
         self.b_del.clicked.connect(self.delete_lines)
         self.b_play.clicked.connect(self.play_selected_clip)
-        self.b_rec.clicked.connect(lambda: self.tabs.setCurrentWidget(self.record))
+        self.b_rec.clicked.connect(lambda: self.tabs.setCurrentIndex(2))
         acts = QHBoxLayout()
         acts.addWidget(self.b_add)
         acts.addWidget(self.b_del)
@@ -236,15 +245,16 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(False)
         self.tabs.setIconSize(QSize(18, 18))
-        self.tabs.addTab(lines_tab, "Реплики")
-        self.tabs.addTab(self.chars, "Персонажи")
-        self.tabs.addTab(self.record, "Запись")
         mix_wrap = QWidget()
         mw = QVBoxLayout(mix_wrap)
         mw.setContentsMargins(12, 12, 12, 12)
         mw.addWidget(self.mix_panel)
         mw.addStretch(1)
-        self.tabs.addTab(mix_wrap, "Сведение")
+        # вкладки прокручиваются, если не помещаются, — окно влезает и на экран ноутбука
+        self.tabs.addTab(scrollable(lines_tab), "Реплики")
+        self.tabs.addTab(scrollable(self.chars), "Персонажи")
+        self.tabs.addTab(scrollable(self.record), "Запись")
+        self.tabs.addTab(scrollable(mix_wrap), "Сведение")
 
         top = QSplitter(Qt.Horizontal)
         top.addWidget(left)
@@ -1551,9 +1561,13 @@ class MainWindow(QMainWindow):
     def _select_line_from_timeline(self, line_id: str):
         self.select_line(line_id, seek=False)
 
+    def _tab_is(self, w) -> bool:
+        cur = self.tabs.currentWidget()
+        return getattr(cur, "inner", cur) is w
+
     def _refresh_chars_progress(self):
         """Счётчики и полоски прогресса ролей: сразу, если вкладка видна, иначе — при открытии."""
-        if self.tabs.currentWidget() is self.chars:
+        if self._tab_is(self.chars):
             cur = self.chars.current()
             self.chars.reload(cur.id if cur else None)
             self._chars_stale = False
@@ -1561,7 +1575,7 @@ class MainWindow(QMainWindow):
             self._chars_stale = True
 
     def _on_tab_changed(self, _i):
-        if self.tabs.currentWidget() is self.chars and getattr(self, "_chars_stale", False):
+        if self._tab_is(self.chars) and getattr(self, "_chars_stale", False):
             self._refresh_chars_progress()
 
     def _on_line_edited(self, line_id: str, label: str = "Правка реплики"):
@@ -1707,7 +1721,7 @@ class MainWindow(QMainWindow):
         """A/B: голос оригинала под репликой, пауза, затем дубль (как в сведении)."""
         from ..core.ab import build_ab
         p = self.project
-        ln = ln or (self.record.line if self.tabs.currentWidget() is self.record else None) \
+        ln = ln or (self.record.line if self._tab_is(self.record) else None) \
             or self.current_line()
         if not p or ln is None or not ln.rec_path:
             self.statusBar().showMessage("Выберите реплику с записью", 4000)
@@ -1733,7 +1747,7 @@ class MainWindow(QMainWindow):
             return
         if lines is None:
             lines = self.selected_lines()
-            if not lines and self.tabs.currentWidget() is self.record and self.record.line:
+            if not lines and self._tab_is(self.record) and self.record.line:
                 lines = [self.record.line]
         if not lines:
             self.statusBar().showMessage("Выделите реплики", 3000)
@@ -1822,7 +1836,7 @@ class MainWindow(QMainWindow):
         cur = self.current_line()
         lines = self.project.lines
         i = lines.index(cur) if cur in lines else -1
-        same_role = self.tabs.currentWidget() is self.record and cur is not None
+        same_role = self._tab_is(self.record) and cur is not None
         j = i
         while True:
             j += delta
@@ -2264,7 +2278,7 @@ class MainWindow(QMainWindow):
             elif action == "record":
                 if recording:
                     self.record.stop_recording(manual=True)
-                elif self.tabs.currentWidget() is self.record:
+                elif self._tab_is(self.record):
                     self.record.start_recording()
                 else:
                     return False
@@ -2335,6 +2349,17 @@ class MainWindow(QMainWindow):
         self.settings.save()
         QApplication.instance().removeEventFilter(self)
         e.accept()
+
+
+def scrollable(w: QWidget) -> QWidget:
+    """Обёртка вкладки с прокруткой; сама вкладка доступна как .inner."""
+    from PySide6.QtWidgets import QScrollArea
+    area = QScrollArea()
+    area.setWidget(w)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.NoFrame)
+    area.inner = w
+    return area
 
 
 HELP_TEXT = """Порядок работы:

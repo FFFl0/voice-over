@@ -107,7 +107,7 @@ class RecordPanel(QWidget):
         self.prompt.setTextFormat(Qt.RichText)   # текст экранируется в prompt_html()
         self.prompt.setObjectName("promptText")
         self.prompt.setWordWrap(True)
-        self.prompt.setMinimumHeight(110)
+        self.prompt.setMinimumHeight(64)
         self.prompt.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.next_lbl = QLabel()
         self.next_lbl.setTextFormat(Qt.PlainText)   # текст реплик — не HTML

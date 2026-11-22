@@ -23,7 +23,7 @@ class VideoPlayer(QWidget):
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
         self.video = QVideoWidget(self)
-        self.video.setMinimumSize(320, 180)
+        self.video.setMinimumSize(240, 120)
         self.video.setObjectName("videoArea")
         self.player.setVideoOutput(self.video)
 
@@ -52,7 +52,7 @@ class VideoPlayer(QWidget):
         self.time_lbl = QLabel("00:00.000")
         self.time_lbl.setObjectName("timecode")
         self.time_lbl.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
-        self.time_lbl.setMinimumWidth(150)
+        self.time_lbl.setMinimumWidth(120)
         self.dur_lbl = QLabel("из 00:00.000")
         self.dur_lbl.setObjectName("muted")
         self.dur_lbl.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
@@ -64,7 +64,11 @@ class VideoPlayer(QWidget):
         self.vol = QSlider(Qt.Horizontal)
         self.vol.setRange(0, 100)
         self.vol.setValue(80)
-        self.vol.setFixedWidth(90)
+        self.vol.setFixedWidth(70)
+        # длинные названия дорожек не должны раздвигать окно
+        self.sound.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sound.setMinimumContentsLength(12)
+        self.slider.setMinimumWidth(60)
 
         transport = QWidget()
         transport.setObjectName("transport")

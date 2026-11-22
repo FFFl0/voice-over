@@ -316,7 +316,10 @@ QCheckBox, QRadioButton {{ spacing: 8px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 15px; height: 15px; border: 1px solid {t.rule2};
     background: {t.paper}; border-radius: 3px; }}
 QCheckBox::indicator:checked {{ background: {t.ink}; border-color: {t.ink}; image: url({_check_svg(t)}); }}
-QRadioButton::indicator:checked {{ background: {t.ink}; border: 4px solid {t.paper}; }}
+QRadioButton::indicator {{ border-radius: 8px; width: 16px; height: 16px; }}
+QRadioButton::indicator:checked {{ border: 2px solid {t.accent};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {t.accent}, stop:0.5 {t.accent}, stop:0.56 {t.paper}, stop:1 {t.paper}); }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover,
 QCheckBox::indicator:focus, QRadioButton::indicator:focus {{ border-color: {t.focus}; }}
 QCheckBox:disabled, QRadioButton:disabled {{ color: {t.muted}; }}

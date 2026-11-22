@@ -54,7 +54,7 @@ class TakeEditor(QWidget):
         self.zoom = 1.0
         self.playhead: Optional[float] = None
         self.setMouseTracking(True)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(110)
         self.setToolTip("Тяните края волны — обрезка, квадратики сверху — нарастание и "
                         "затухание, саму волну — сдвиг записи. Двойной клик по ручке — сброс. "
                         "Колесо — масштаб, клик по пустому месту — перейти к моменту видео.")

@@ -79,6 +79,19 @@ def install_excepthook() -> None:
         "".join(traceback.format_exception(a.exc_type, a.exc_value, a.exc_traceback)))
 
 
+def install_russian(app) -> None:
+    """Стандартные кнопки и окна Qt (OK, Cancel, Yes, No, выбор файла) — по-русски."""
+    from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+    QLocale.setDefault(QLocale(QLocale.Russian, QLocale.Russia))
+    app._translators = []
+    path = QLibraryInfo.path(QLibraryInfo.TranslationsPath)
+    for name in ("qtbase_ru", "qt_ru"):
+        tr = QTranslator(app)
+        if tr.load(name, path):
+            app.installTranslator(tr)
+            app._translators.append(tr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv if argv is None else argv
     if len(args) > 2 and args[1] == "--separate-worker":   # дочерний процесс Demucs (.exe)
@@ -100,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(argv)
+    install_russian(app)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("VoiceOverStudio")
     from .ui import theme
@@ -108,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     theme.apply_theme(app, settings.theme)
     app.setWindowIcon(theme.app_icon())
     win = MainWindow(settings)
-    win.show()
+    win.showMaximized() if win._start_maximized else win.show()
     # Открыть проект/видео, переданный в командной строке (или перетащенный на .exe)
     if len(argv) > 1:
         p = Path(argv[1])

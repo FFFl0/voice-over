@@ -7,7 +7,8 @@ from typing import Optional
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QScrollBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QScrollArea, QScrollBar, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from ..core.models import Project, line_status
 from . import theme
@@ -682,6 +683,11 @@ class TimelineCanvas(QWidget):
 
     def wheelEvent(self, e):
         d = e.angleDelta().y() or e.angleDelta().x()
+        area = self.parentWidget().parentWidget() if self.parentWidget() else None
+        tall = isinstance(area, QScrollArea) and self.height() > area.viewport().height() + 1
+        if tall and (e.modifiers() & Qt.ShiftModifier or e.position().x() < LABEL_W):
+            e.ignore()          # над подписями дорожек или с Shift — прокрутка дорожек вверх-вниз
+            return
         if e.modifiers() & Qt.ControlModifier:
             self.zoom(1.25 if d > 0 else 0.8, e.position().x())
         else:
@@ -701,11 +707,31 @@ class Timeline(QWidget):
         super().__init__(parent)
         self.canvas = TimelineCanvas(self)
         self.scroll = QScrollBar(Qt.Horizontal, self)
+        # много персонажей — дорожки прокручиваются по вертикали, окно не растёт
+        self.area = QScrollArea(self)
+        self.area.setWidget(self.canvas)
+        self.area.setWidgetResizable(True)
+        self.area.setFrameShape(QFrame.NoFrame)
+        self.area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.area.setMinimumHeight(110)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self.canvas, 1)
-        lay.addWidget(self.scroll)
+        lay.addWidget(self.area, 1)
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 4, 0)
+        bottom.setSpacing(2)
+        bottom.addWidget(self.scroll, 1)
+        for text, tip, fn in (("−", "Уменьшить масштаб (Ctrl+колесо, Ctrl+−)", lambda: self.canvas.zoom(0.8)),
+                              ("+", "Увеличить масштаб (Ctrl+колесо, Ctrl+=)", lambda: self.canvas.zoom(1.25)),
+                              ("Весь фильм", "Показать весь фильм целиком", self.fit_all)):
+            b = QToolButton()
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setAutoRaise(True)
+            b.clicked.connect(fn)
+            bottom.addWidget(b)
+        lay.addLayout(bottom)
         self.duration = 0.0
         self.canvas.viewChanged.connect(self._sync_scroll)
         self.scroll.valueChanged.connect(self._on_scroll)
@@ -732,6 +758,14 @@ class Timeline(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._sync_scroll()
+
+    def fit_all(self) -> None:
+        c = self.canvas
+        dur = max(1.0, self.duration or (c.project.duration if c.project else 0) or 60.0)
+        c.pps = max(2.0, min(800.0, (c.width() - LABEL_W - 10) / dur))
+        c.offset = 0.0
+        c.viewChanged.emit()
+        c.update()
 
     def _sync_scroll(self):
         self.scroll.blockSignals(True)
