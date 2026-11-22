@@ -1,6 +1,36 @@
 [
  {
   "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "midnight",
+  "axes": "dark/grotesk-sans/cool-neutral",
+  "hero": "none (app)",
+  "nav": "top bar, grouped by stage",
+  "footer": "status bar",
+  "imagery": "product only",
+  "photos": [],
+  "entry": "welcome: intro | recent or steps",
+  "fingerprint": "midnight-app-lead-per-tab",
+  "sections": [
+   "welcome",
+   "lines: progress lead, list, selected line",
+   "record: cue, transport, mic, take",
+   "characters: roles, role+voice",
+   "mix: mode, original, volume, recordings"
+  ],
+  "signature": "the cue under the picture, lane lit on the timeline (kept)",
+  "waived": [
+   "26a",
+   "theme-light",
+   "user brand: warm slate, Manrope, radius 4/6"
+  ],
+  "prompt": "desktop studio for multi-voice dubbing",
+  "date": "2026-11-22"
+ },
+ {
+  "mode": "redesign",
   "depth": "restyle",
   "scope": "app",
   "shape": "app screen",

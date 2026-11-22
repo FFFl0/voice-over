@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QItemSelectionModel, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QApplication, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
@@ -138,7 +138,7 @@ class MainWindow(QMainWindow):
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(C_TEXT, QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        for col, w in ((0, 56), (1, 92), (2, 92), (3, 130), (5, 112), (6, 58)):
+        for col, w in ((0, 50), (1, 86), (2, 86), (3, 120), (5, 104), (6, 52)):
             self.table.setColumnWidth(col, w)
         self.table.setColumnWidth(C_ORIG, 240)
         self.table.setColumnHidden(C_ORIG, True)
@@ -156,11 +156,6 @@ class MainWindow(QMainWindow):
                            ("На переписку", "redo"), ("Без роли", "nochar"),
                            ("Выключены", "off"), ("Слишком быстрые", "fast")):
             self.f_status.addItem(label, key)
-        filt = QHBoxLayout()
-        filt.addWidget(self.search, 1)
-        filt.addWidget(self.f_char)
-        filt.addWidget(self.f_status)
-
         self.assign = QComboBox()
         self.assign.setToolTip("Назначить роль выделенным репликам")
         self.assign.setMinimumWidth(150)
@@ -176,20 +171,9 @@ class MainWindow(QMainWindow):
         self.b_del.clicked.connect(self.delete_lines)
         self.b_play.clicked.connect(self.play_selected_clip)
         self.b_rec.clicked.connect(lambda: self.tabs.setCurrentIndex(2))
-        acts = QHBoxLayout()
-        acts.addWidget(self.b_add)
-        acts.addWidget(self.b_del)
-        acts.addSpacing(8)
-        role_lbl = QLabel("Роль:")
-        role_lbl.setObjectName("muted")
-        acts.addWidget(role_lbl)
-        acts.addWidget(self.assign, 1)
-        acts.addSpacing(8)
-        acts.addWidget(self.b_play)
-        acts.addWidget(self.b_rec)
 
         self.text_edit = QPlainTextEdit()
-        self.text_edit.setPlaceholderText("Текст выделенной реплики")
+        self.text_edit.setPlaceholderText("Текст реплики")
         self.text_edit.setMaximumHeight(72)
         self.text_edit.setToolTip("Ударение — Ctrl+' после гласной. Пометки для актёра — в "
                                   "скобках: (смеётся), [шёпотом]; они не произносятся.")
@@ -203,43 +187,100 @@ class MainWindow(QMainWindow):
         self.orig_lbl.hide()
         self.note_edit = QLineEdit()
         self.note_edit.setPlaceholderText("Заметка для актёра: интонация, ударение…")
-        # Сводка готовности: числа отдельно, каждое со своей подписью
+
+        # 1) что ведёт экран: сколько серии записано и следующее действие
         self.stats = QWidget()
-        sl = QHBoxLayout(self.stats)
-        sl.setContentsMargins(0, 6, 0, 0)
-        sl.setSpacing(28)
+        sv = QVBoxLayout(self.stats)
+        sv.setContentsMargins(0, 0, 0, 0)
+        sv.setSpacing(6)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
         self.stat_labels: dict[str, QLabel] = {}
-        for key, caption in (("ready", "записано"), ("none", "не записано"), ("redo", "переписать"),
-                             ("nochar", "без роли")):
-            box = QVBoxLayout()
-            box.setSpacing(0)
-            fig = QLabel("0")
-            fig.setObjectName("figure")
-            fig.setFont(theme.display_font(theme.TEXT_2XL, tabular=True))
-            cap = QLabel(caption)
-            cap.setObjectName("label")
-            box.addWidget(fig)
-            box.addWidget(cap)
-            sl.addLayout(box)
-            self.stat_labels[key] = fig
-        sl.addStretch(1)
-        self.b_next_todo = QPushButton(theme.icon("mic"), " Записать следующую незаписанную")
+        fig = QLabel("0 из 0")
+        fig.setObjectName("figure")
+        fig.setFont(theme.display_font(theme.TEXT_3XL, tabular=True))
+        self.stat_labels["ready"] = fig
+        cap = QLabel("реплик записано")
+        cap.setObjectName("muted")
+        top_row.addWidget(fig, 0, Qt.AlignBottom)
+        top_row.addWidget(cap, 0, Qt.AlignBottom)
+        top_row.addStretch(1)
+        self.b_next_todo = QPushButton(theme.icon("mic", theme.current().accent_ink),
+                                       " Записать следующую")
+        self.b_next_todo.setProperty("primary", True)
         self.b_next_todo.setToolTip("Перейти к ближайшей незаписанной реплике (или на переписку) "
                                     "и открыть вкладку «Запись» (клавиша U)")
         self.b_next_todo.clicked.connect(lambda: self.goto_next_todo(record=True))
-        sl.addWidget(self.b_next_todo)
+        top_row.addWidget(self.b_next_todo, 0, Qt.AlignBottom)
+        sv.addLayout(top_row)
+        self.done_meter = QProgressBar()
+        self.done_meter.setObjectName("level")     # тонкая дорожка: 4px, без текста
+        self.done_meter.setTextVisible(False)
+        self.done_meter.setRange(0, 1000)
+        sv.addWidget(self.done_meter)
+        counts = QHBoxLayout()
+        counts.setSpacing(18)
+        for key, caption in (("none", "не записано"), ("redo", "на переписку"),
+                             ("nochar", "без роли")):
+            n = QLabel("0")
+            n.setFont(theme.body_font(theme.TEXT_SM, QFont.DemiBold, tabular=True))
+            c = QLabel(caption)
+            c.setObjectName("muted")
+            pair = QHBoxLayout()
+            pair.setSpacing(5)
+            pair.addWidget(n)
+            pair.addWidget(c)
+            counts.addLayout(pair)
+            self.stat_labels[key] = n
+        counts.addStretch(1)
+        sv.addLayout(counts)
+
+        # 2) список: поиск и фильтры, действия над таблицей, сама таблица
+        # две строки, чтобы колонка оставалась узкой: поиск с действиями, затем фильтры
+        filt = QVBoxLayout()
+        filt.setSpacing(6)
+        f1 = QHBoxLayout()
+        f1.addWidget(self.search, 1)
+        f1.addWidget(self.b_add)
+        f1.addWidget(self.b_del)
+        f2 = QHBoxLayout()
+        f2.addWidget(self.f_char, 1)
+        f2.addWidget(self.f_status, 1)
+        filt.addLayout(f1)
+        filt.addLayout(f2)
+        self.search.setMinimumWidth(160)
+        self.table.setMinimumHeight(180)   # таблица — главное, не сжимать до пустоты
+
+        # 3) выделенная реплика: её текст, оригинал, заметка, роль и что с ней сделать
+        self.line_box = QFrame()
+        self.line_box.setObjectName("well")
+        lb = QVBoxLayout(self.line_box)
+        lb.setContentsMargins(14, 12, 14, 12)
+        lb.setSpacing(8)
+        lb_title = QLabel("Выделенная реплика")
+        lb_title.setObjectName("itemTitle")
+        lb.addWidget(lb_title)
+        lb.addWidget(self.text_edit)
+        lb.addWidget(self.orig_lbl)
+        lb.addWidget(self.note_edit)
+        acts = QHBoxLayout()
+        role_lbl = QLabel("Роль:")
+        role_lbl.setObjectName("muted")
+        acts.addWidget(role_lbl)
+        acts.addWidget(self.assign, 1)
+        acts.addSpacing(8)
+        acts.addWidget(self.b_play)
+        acts.addWidget(self.b_rec)
+        lb.addLayout(acts)
 
         lines_tab = QWidget()
         ll = QVBoxLayout(lines_tab)
         ll.setContentsMargins(16, 14, 16, 12)
-        ll.setSpacing(8)
+        ll.setSpacing(10)
+        ll.addWidget(self.stats)
         ll.addLayout(filt)
         ll.addWidget(self.table, 1)
-        ll.addWidget(self.text_edit)
-        ll.addWidget(self.orig_lbl)
-        ll.addWidget(self.note_edit)
-        ll.addLayout(acts)
-        ll.addWidget(self.stats)
+        ll.addWidget(self.line_box)
 
         # ---- остальные вкладки
         self.chars = CharactersPanel()
@@ -560,8 +601,10 @@ class MainWindow(QMainWindow):
         for a in self.findChildren(QAction):
             name = a.property("iconName")
             if name:
-                color = th.accent_text if a is self.a_export else None
-                a.setIcon(theme.icon(name, color))
+                a.setIcon(theme.icon(name))
+        # залитая кнопка одна на вкладке — главное действие «Реплик»
+        self.b_next_todo.setIcon(theme.icon("mic", th.accent_ink))
+        self.record.btn_rec.setIcon(theme.icon("record", th.paper))
         self.a_theme.setIcon(theme.icon("sun" if th.dark else "moon"))
         self.b_add.setIcon(theme.icon("plus"))
         self.b_del.setIcon(theme.icon("trash"))
@@ -698,6 +741,7 @@ class MainWindow(QMainWindow):
             for lbl in self.stat_labels.values():
                 lbl.setText("0")
             self.b_next_todo.setEnabled(False)
+            self.done_meter.setValue(0)
             return
         counts: dict[str, int] = {}
         for ln in self.project.lines:
@@ -705,10 +749,11 @@ class MainWindow(QMainWindow):
             counts[st] = counts.get(st, 0) + 1
         total = len(self.project.lines)
         ready = counts.get("rec", 0) + counts.get("ok", 0)
-        self.stat_labels["ready"].setText(f"{ready} из {total}")
-        self.b_next_todo.setEnabled(bool(counts.get("none", 0) + counts.get("redo", 0)))
         todo = sum(1 for ln in self.project.lines if ln.enabled and ln.text.strip())
+        self.stat_labels["ready"].setText(f"{ready} из {todo or total}")
+        self.b_next_todo.setEnabled(bool(counts.get("none", 0) + counts.get("redo", 0)))
         self._progress = ready / todo if todo else None
+        self.done_meter.setValue(int(1000 * (self._progress or 0)))
         self._update_title()
         for key in ("none", "redo", "nochar"):
             self.stat_labels[key].setText(str(counts.get(key, 0)))
@@ -2429,7 +2474,7 @@ class MainWindow(QMainWindow):
         """На узком экране правой колонке — не меньше, чем нужно вкладке «Запись»."""
         sp = self._top_split
         total = sum(sp.sizes())
-        need = 640
+        need = 600
         if total and sp.sizes()[1] < need and total - need >= self.player.minimumSizeHint().width():
             sp.setSizes([total - need, need])
 
@@ -2456,7 +2501,7 @@ def menu_header(title: str, menu) -> QAction:
     """Заголовок группы в меню (некликабельная подпись)."""
     from PySide6.QtWidgets import QWidgetAction
     act = QWidgetAction(menu)
-    lbl = QLabel(title.upper())
+    lbl = QLabel(title)   # без капслока: подпись, а не заголовок плаката
     lbl.setObjectName("label")
     lbl.setContentsMargins(14, 6, 14, 2)
     act.setDefaultWidget(lbl)

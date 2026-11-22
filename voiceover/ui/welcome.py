@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QStyledItemDelegate,
                                QPushButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
@@ -28,6 +28,37 @@ def project_summary(path: str) -> str:
         return "реплик пока нет"
     done = sum(1 for ln in lines if ln.get("rec_path") and ln.get("review") != "redo")
     return f"записано {done} из {len(lines)} ({done * 100 // len(lines)}%)"
+
+
+class RecentDelegate(QStyledItemDelegate):
+    """Строка недавнего проекта: название и прогресс в одну линию, папка под ними."""
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 58)
+
+    def paint(self, p: QPainter, option, index):
+        from PySide6.QtWidgets import QStyle
+        th = theme.current()
+        r = option.rect.adjusted(14, 8, -14, -8)
+        p.save()
+        if option.state & QStyle.State_MouseOver or option.state & QStyle.State_Selected:
+            p.fillRect(option.rect, QColor(th.paper3))
+        missing = index.data(Qt.UserRole + 1) == "файл не найден"
+        p.setFont(theme.body_font(theme.TEXT_MD, QFont.Medium))
+        p.setPen(QColor(th.muted if missing else th.ink))
+        info = index.data(Qt.UserRole + 1) or ""
+        fm = p.fontMetrics()
+        p.drawText(QRectF(r.left(), r.top(), r.width() - 190, 22), Qt.AlignLeft | Qt.AlignVCenter,
+                   fm.elidedText(index.data(Qt.DisplayRole) or "", Qt.ElideRight, r.width() - 200))
+        p.setFont(theme.body_font(theme.TEXT_SM, tabular=True))
+        p.setPen(QColor(th.muted))
+        p.drawText(QRectF(r.right() - 190, r.top(), 190, 22), Qt.AlignRight | Qt.AlignVCenter, info)
+        folder = str(Path(index.data(Qt.UserRole) or "").parent)
+        p.drawText(QRectF(r.left(), r.top() + 22, r.width(), 20), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(folder, Qt.ElideMiddle, r.width()))
+        p.setPen(QColor(th.rule))
+        p.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+        p.restore()
 
 
 class WelcomePage(QWidget):
@@ -57,50 +88,65 @@ class WelcomePage(QWidget):
         btns.addWidget(self.btn_open)
         btns.addStretch(1)
 
-        steps = QHBoxLayout()
+        # первый запуск: четыре шага столбцом (значок, шаг, что в нём делают)
+        self.steps_box = QWidget()
+        steps = QVBoxLayout(self.steps_box)
         steps.setContentsMargins(0, 0, 0, 0)
-        steps.setSpacing(2)
+        steps.setSpacing(14)
+        steps_title = QLabel("Как устроена работа")
+        steps_title.setObjectName("itemTitle")
+        steps.addWidget(steps_title)
         self._step_cards = []
         for ic, head, text in (
                 ("film", "1. Видео", "Выберите фильм или серию"),
                 ("subs", "2. Текст", "Импорт субтитров или распознавание Whisper"),
                 ("mic", "3. Запись", "Актёры записывают роли под видео"),
                 ("export", "4. Экспорт", "Видео с новой звуковой дорожкой")):
-            card = QFrame()
-            card.setObjectName("stepCard")
-            cl = QVBoxLayout(card)
-            cl.setContentsMargins(16, 14, 16, 14)
+            row = QHBoxLayout()
+            row.setSpacing(14)
             icl = QLabel()
             icl.setProperty("iconName", ic)
+            icl.setFixedWidth(28)
+            txt = QVBoxLayout()
+            txt.setSpacing(2)
             h = QLabel(head)
             h.setObjectName("itemTitle")
             t = QLabel(text)
             t.setObjectName("muted")
             t.setWordWrap(True)
-            cl.addWidget(icl)
-            cl.addWidget(h)
-            cl.addWidget(t)
-            card.setFixedWidth(200)
-            card.setMinimumHeight(132)
-            steps.addWidget(card)
+            txt.addWidget(h)
+            txt.addWidget(t)
+            row.addWidget(icl, 0, Qt.AlignTop)
+            row.addLayout(txt, 1)
+            steps.addLayout(row)
             self._step_cards.append(icl)
+        steps.addStretch(1)
 
+        # вернулись: главное — недавние проекты с прогрессом
+        self.recent_box = QWidget()
+        rb = QVBoxLayout(self.recent_box)
+        rb.setContentsMargins(0, 0, 0, 0)
+        rb.setSpacing(8)
         self.recent_title = QLabel("Недавние проекты")
-        self.recent_title.setObjectName("label")
+        self.recent_title.setObjectName("itemTitle")
         self.recent = QListWidget()
         self.recent.setWordWrap(True)
         self.recent.setObjectName("recent")
-        self.recent.setMinimumHeight(150)
+        self.recent.setItemDelegate(RecentDelegate(self.recent))
+        self.recent.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.recent.setMouseTracking(True)
+        self.recent.setMinimumHeight(220)
         self.recent.itemActivated.connect(lambda it: self.recentRequested.emit(it.data(Qt.UserRole)))
         self.recent.itemClicked.connect(lambda it: self.recentRequested.emit(it.data(Qt.UserRole)))
+        rb.addWidget(self.recent_title)
+        rb.addWidget(self.recent, 1)
         ver = QLabel(f"версия {__version__}")
         ver.setObjectName("muted")
         ver.setAlignment(Qt.AlignRight)
 
-        # Одна колонка фиксированной ширины по центру; внутри всё выровнено влево
-        body = QWidget()
-        body.setMaximumWidth(860)
-        col = QVBoxLayout(body)
+        # две колонки: слева кто мы и что начать, справа — с чем продолжить (или шаги)
+        intro = QWidget()
+        col = QVBoxLayout(intro)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(12)
         col.addWidget(self.logo)
@@ -109,14 +155,22 @@ class WelcomePage(QWidget):
         col.addWidget(sub)
         col.addSpacing(14)
         col.addLayout(btns)
-        col.addSpacing(36)
-        col.addLayout(steps)
-        col.addSpacing(36)
-        col.addWidget(self.recent_title)
-        col.addWidget(self.recent)
+        col.addStretch(1)
+        right = QWidget()
+        rc = QVBoxLayout(right)
+        rc.setContentsMargins(0, 0, 0, 0)
+        rc.addWidget(self.recent_box)
+        rc.addWidget(self.steps_box)
+        body = QWidget()
+        body.setMaximumWidth(1080)
+        bl = QHBoxLayout(body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(64)
+        bl.addWidget(intro, 5)
+        bl.addWidget(right, 6)
         center = QHBoxLayout()
         center.addStretch(1)
-        center.addWidget(body, 6)
+        center.addWidget(body, 8)
         center.addStretch(1)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(40, 40, 40, 16)
@@ -140,12 +194,10 @@ class WelcomePage(QWidget):
     def set_recent(self, paths: list[str]):
         self.recent.clear()
         for p in paths[:6]:
-            info = project_summary(p)
-            it = QListWidgetItem(f"{Path(p).stem}   ·   {info}\n{Path(p).parent}")
+            it = QListWidgetItem(Path(p).stem)
             it.setData(Qt.UserRole, p)
+            it.setData(Qt.UserRole + 1, project_summary(p))
             it.setToolTip(p)
-            if info == "файл не найден":
-                it.setForeground(QColor(theme.current().muted))
             self.recent.addItem(it)
-        self.recent.setVisible(bool(paths))
-        self.recent_title.setVisible(bool(paths))
+        self.recent_box.setVisible(bool(paths))
+        self.steps_box.setVisible(not paths)

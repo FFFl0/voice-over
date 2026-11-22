@@ -14,8 +14,10 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalett
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
-STAMP = """/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight (by request, deal 1/3, seed desktop-studio-multi-voice-dubbing-78f8·c508889d·2026-11-19·r0) · redesign: restyle
- * nav: kept · signature: kept, the cue under the picture with its lane lit on the timeline · states: empty (welcome, no lines, no take), busy (task bar), error (dialogs), full
+STAMP = """/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight (brand, the user's own edits kept) · redesign: full · scope: app · 2026-11-22
+ * screens: welcome (intro | recent projects or the four steps), lines (progress and «Записать следующую» lead, then the list, then the selected line), record (the cue, the transport, the microphone, then the take), characters (the roles with progress, then role and voice), mix (mode, then original, volume, recordings)
+ * one filled control per tab: «Записать следующую» on lines, the red «Записать» on record; export is outlined in the top bar
+ * nav: the top bar, grouped by stage · signature: kept, the cue under the picture with its lane lit on the timeline · states: empty (welcome, no lines, no take, filter with no rows), busy (task bar), error (dialogs), full
  * axes: dark/grotesk-sans/cool-neutral · posture: committed · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P2 H- E2 S2 R2 V2 · weakest: E, Qt has no outline or focus-visible, so focus is a 1px focus-colour edge on every control */
 /* Hallmark · user edits over the theme: the ground lifted from 14% to 22% lightness and its chroma cut to a slate, the ink warmed to paper-white, radius 4px on controls and 6px on surfaces (the theme's do-nots say square and cold; the user's words win) */
@@ -235,10 +237,10 @@ QToolButton:hover {{ background: {t.paper3}; }}
 QToolButton:pressed, QToolButton:checked {{ background: {t.paper2}; }}
 QToolButton:focus {{ border-color: {t.focus}; }}
 QToolButton:disabled {{ color: {t.muted}; }}
-QToolButton#primaryAction {{ background: {t.accent}; color: {t.accent_ink}; font-weight: 500;
-                            padding: 7px 16px; }}
-QToolButton#primaryAction:hover {{ background: {t.focus}; }}
-QToolButton#primaryAction:disabled {{ background: {t.paper3}; color: {t.muted}; }}
+QToolButton#primaryAction {{ background: transparent; color: {t.ink}; font-weight: 500;
+                            border: 1px solid {t.rule2}; padding: 7px 16px; }}
+QToolButton#primaryAction:hover {{ background: {t.paper3}; border-color: {t.ink2}; }}
+QToolButton#primaryAction:disabled {{ color: {t.muted}; border-color: {t.rule}; }}
 QLabel#groupLabel {{ color: {t.muted}; font-size: {TEXT_SM}pt; padding: 0 2px 0 8px; }}
 
 QPushButton {{ background: transparent; border: 1px solid {t.rule2}; border-radius: {RADIUS_SM}px;
@@ -252,9 +254,16 @@ QPushButton[primary="true"]:hover {{ background: {t.focus}; border-color: {t.foc
 QPushButton[primary="true"]:focus {{ border-color: {t.ink}; }}
 QPushButton[primary="true"]:disabled {{ background: {t.paper3}; color: {t.muted}; border-color: {t.paper3}; }}
 QPushButton[danger="true"] {{ color: {t.error}; }}
-QPushButton#recButton {{ min-height: 40px; font-size: {TEXT_LG}pt; font-weight: 600; }}
+QPushButton#recButton {{ min-height: 40px; font-size: {TEXT_LG}pt; font-weight: 600;
+    background: {t.error}; color: {t.paper}; border-color: {t.error}; }}
+QPushButton#recButton:hover {{ background: {t.ink}; color: {t.paper}; border-color: {t.ink}; }}
+QPushButton#recButton:disabled {{ background: {t.paper3}; color: {t.muted}; border-color: {t.rule}; }}
 QPushButton#recButton[recording="true"] {{ background: {t.error}; color: {t.paper}; border-color: {t.error}; }}
 QPushButton#recButton[recording="true"][blink="true"] {{ background: {t.paper3}; color: {t.error}; }}
+QToolButton#menuButton {{ border: 1px solid {t.rule2}; border-radius: {RADIUS_SM}px;
+    padding: 6px 22px 6px 12px; color: {t.ink}; }}
+QToolButton#menuButton:hover {{ background: {t.paper3}; }}
+QToolButton#menuButton::menu-indicator {{ subcontrol-position: right center; right: 8px; }}
 QToolButton#optsToggle {{ border: 0; color: {t.muted}; padding: 2px 0; }}
 QToolButton#optsToggle:hover {{ color: {t.ink}; }}
 QPushButton[quiet="true"] {{ border-color: transparent; }}

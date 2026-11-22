@@ -310,6 +310,15 @@ class LinesView(QTableView):
                   "или нажмите «Распознать», чтобы получить текст из звука.\n"
                   "Добавить вручную — «+ Реплика» внизу или клавиша N.")
     FILTERED_TEXT = "Нет реплик, подходящих под фильтр.\nИзмените поиск, персонажа или статус."
+    NARROW = 720   # уже — прячем «Конец» и «Темп», чтобы текст реплики оставался читаемым
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        narrow = self.viewport().width() < self.NARROW
+        if getattr(self, "_narrow", None) != narrow:
+            self._narrow = narrow
+            for c in (C_END, C_RATE):
+                self.setColumnHidden(c, narrow)
 
     """Таблица реплик с заметной рамкой вокруг выделенных строк.
 

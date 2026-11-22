@@ -121,7 +121,7 @@ class RecordPanel(QWidget):
         self.meter.setValue(0)
         self.meter.setTextVisible(False)
 
-        self.btn_rec = QPushButton(theme.icon("record", theme.current().danger), " Записать (R)")
+        self.btn_rec = QPushButton(theme.icon("record", theme.current().paper), " Записать (R)")
         self.btn_rec.setProperty("danger", True)
         self.btn_rec.setObjectName("recButton")
         self._blink = QTimer(self, interval=500, timeout=self._blink_rec)
@@ -218,7 +218,6 @@ class RecordPanel(QWidget):
         btns2.addWidget(self.btn_ok)
         btns2.addWidget(self.btn_redo)
         take = QHBoxLayout()
-        take.addWidget(QLabel("Дубль:"))
         take.addWidget(self.take_box, 1)
         take.addWidget(self.btn_del)
         take.addSpacing(8)
@@ -268,14 +267,22 @@ class RecordPanel(QWidget):
         cl.addWidget(self.meter)
         cl.addWidget(self.countdown)
 
+        # порядок экрана: что читать (суфлёр) → как записать → чем → что вышло (дубль)
+        def head(text: str) -> QLabel:
+            h = QLabel(text)
+            h.setObjectName("itemTitle")
+            return h
+
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setContentsMargins(14, 14, 14, 12)
         lay.setSpacing(10)
-        lay.addLayout(form)
         lay.addWidget(card)
         lay.addLayout(btns)
-        lay.addLayout(btns2)
+        lay.addLayout(form)
+        lay.addSpacing(6)
+        lay.addWidget(head("Дубль"))
         lay.addLayout(take)
+        lay.addLayout(btns2)
         lay.addLayout(edits)
         from .take_editor import TakeEditor
         self.editor = TakeEditor()

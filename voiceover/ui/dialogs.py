@@ -314,15 +314,25 @@ class MixPanel(QWidget):
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)   # поля по размеру значения
         for w in (self.duck, self.attack, self.release, self.bg, self.voices, self.denoise):
             w.setMinimumWidth(110)
+        def section(text: str) -> QLabel:
+            h = QLabel(text)
+            h.setObjectName("itemTitle")
+            f.addRow(h)
+            return h
+
+        # главное — режим; дальше разделы в порядке, в каком их обычно трогают
         f.addRow("Режим:", self.mode)
         f.addRow(self.bg_status)
         f.addRow(self.only_lines)
-        f.addRow("Оригинал под репликой тише на:", self.duck)
+        self.duck_head = section("Оригинал под репликами")
+        f.addRow("Тише на:", self.duck)
         f.addRow("Плавно тише за:", self.attack)
         f.addRow("Плавно громче за:", self.release)
-        f.addRow("Громкость оригинала и фона:", self.bg)
-        f.addRow("Громкость озвучки:", self.voices)
+        section("Громкость")
+        f.addRow("Оригинал и фон:", self.bg)
+        f.addRow("Озвучка:", self.voices)
         f.addRow(self.normalize)
+        section("Записи")
         f.addRow("Шумоподавление:", self.denoise)
         f.addRow("Заглушить:", self.tracks_row)
         self.set_tracks(["original"])
