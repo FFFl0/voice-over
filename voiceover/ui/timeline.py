@@ -22,6 +22,13 @@ EDGE_PX = 6
 SCROLL_ZONE = 36   # px у края, где перетаскивание прокручивает таймлайн
 MUTE_W = 26        # кнопка заглушения дорожки звука в колонке подписей
 
+# полные названия кнопок у дорожек персонажей (всплывают при наведении)
+ROLE_BTN_TIPS = {
+    "solo": "<b>S — Соло</b><br>Слышна только эта роль, остальные молчат.<br>"
+            "Можно включить у нескольких ролей.",
+    "mute": "<b>M — Заглушить</b> (Mute)<br>Эта роль не звучит, остальные — как обычно.",
+}
+
 # дорожки звука: ключ → подпись
 WAVE_TITLES = {"original": "оригинал", "vocals": "голоса", "background": "фон"}
 
@@ -542,8 +549,10 @@ class TimelineCanvas(QWidget):
             rb = self.role_btn_at(pos)
             if rb is not None:
                 self.setCursor(Qt.PointingHandCursor)
-                self.setToolTip("Соло: слышна только эта роль (можно включить у нескольких)"
-                                if rb[0] == "solo" else "Заглушить роль в превью и экспорте")
+                tip = ROLE_BTN_TIPS[rb[0]]
+                self.setToolTip(tip)
+                from PySide6.QtWidgets import QToolTip
+                QToolTip.showText(self.mapToGlobal(pos.toPoint()), tip, self)   # сразу, без задержки
                 return
             mk = self.marker_at(pos)
             if mk is not None:

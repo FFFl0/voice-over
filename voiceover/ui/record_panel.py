@@ -126,16 +126,16 @@ class RecordPanel(QWidget):
         self.btn_rec.setObjectName("recButton")
         self._blink = QTimer(self, interval=500, timeout=self._blink_rec)
         self.btn_stop = QPushButton(theme.icon("stop"), " Стоп")
-        self.btn_play = QPushButton(theme.icon("headphones"), " Дубль")
+        self.btn_play = QPushButton(theme.icon("headphones"), " Слушать")
         self.btn_play.setToolTip("Прослушать запись вместе с видео")
-        self.btn_ab = QPushButton("A/B")
+        self.btn_ab = QPushButton("Сравнить A/B")
         self.btn_ab.setToolTip("Сравнить: сначала голос оригинала, затем ваш дубль (B)")
         self.btn_ab.clicked.connect(self.abRequested.emit)
         self.btn_del = QPushButton(theme.icon("trash"), "")
         self.btn_del.setToolTip("Удалить выбранный дубль с диска")
-        self.btn_prev = QPushButton(theme.icon("back"), "")
+        self.btn_prev = QPushButton(theme.icon("back"), " Пред.")
         self.btn_prev.setToolTip("Предыдущая реплика этой роли")
-        self.btn_next = QPushButton(theme.icon("fwd"), "")
+        self.btn_next = QPushButton(theme.icon("fwd"), " След.")
         self.btn_next.setToolTip("Следующая реплика этой роли")
         self.offset = QDoubleSpinBox()
         self.offset.setRange(-10, 10)
@@ -195,17 +195,8 @@ class RecordPanel(QWidget):
         of = QFormLayout(self.opts_box)
         of.setContentsMargins(0, 0, 0, 0)
         of.addRow("Преролл:", self.preroll)
-        opts = QHBoxLayout()
-        opts.addWidget(self.auto_stop)
-        opts.addWidget(self.auto_next)
-        opts.addWidget(self.loop)
-        opts.addStretch(1)
-        of.addRow(opts)
-        opts2 = QHBoxLayout()
-        opts2.addWidget(self.mute_video)
-        opts2.addWidget(self.auto_align)
-        opts2.addStretch(1)
-        of.addRow(opts2)
+        for cb in (self.auto_stop, self.auto_next, self.loop, self.mute_video, self.auto_align):
+            of.addRow(cb)
         form.addRow(self.opts_toggle)
         form.addRow(self.opts_box)
         self.opts_toggle.toggled.connect(self._toggle_opts)
@@ -215,29 +206,45 @@ class RecordPanel(QWidget):
         self.opts_toggle.setChecked(settings.record_opts_open)
         self._toggle_opts(settings.record_opts_open)
 
+        # ряды компактные, чтобы вкладка помещалась в узкой колонке
         btns = QHBoxLayout()
-        for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_play, self.btn_ab,
-                  self.btn_next):
+        for b in (self.btn_prev, self.btn_rec, self.btn_stop, self.btn_next):
             b.setMinimumHeight(40)
             btns.addWidget(b, 2 if b is self.btn_rec else 1)
+        btns2 = QHBoxLayout()
+        for b in (self.btn_play, self.btn_ab):
+            btns2.addWidget(b)
+        btns2.addStretch(1)
+        btns2.addWidget(self.btn_ok)
+        btns2.addWidget(self.btn_redo)
         take = QHBoxLayout()
         take.addWidget(QLabel("Дубль:"))
         take.addWidget(self.take_box, 1)
         take.addWidget(self.btn_del)
-        take.addSpacing(12)
+        take.addSpacing(8)
         take.addWidget(QLabel("Сдвиг:"))
         take.addWidget(self.offset)
         take.addWidget(self.btn_align)
-        take.addSpacing(12)
-        take.addWidget(self.btn_ok)
-        take.addWidget(self.btn_redo)
 
-        edits = QHBoxLayout()
-        for lbl, w in (("Громкость:", self.gain), ("Обрезать:", self.trim_in), ("–", self.trim_out),
-                       ("Нарастание:", self.fade_in), ("Затухание:", self.fade_out)):
-            edits.addWidget(QLabel(lbl))
-            edits.addWidget(w)
-        edits.addStretch(1)
+        from PySide6.QtWidgets import QGridLayout
+        edits = QGridLayout()
+        edits.setHorizontalSpacing(8)
+        trim_row = QHBoxLayout()
+        trim_row.addWidget(self.trim_in)
+        trim_row.addWidget(QLabel("–"))
+        trim_row.addWidget(self.trim_out)
+        trim_row.addStretch(1)
+        for r, c, lbl, w in ((0, 0, "Громкость:", self.gain), (0, 2, "Обрезать:", trim_row),
+                             (1, 0, "Нарастание:", self.fade_in), (1, 2, "Затухание:", self.fade_out)):
+            edits.addWidget(QLabel(lbl), r, c)
+            if isinstance(w, QHBoxLayout):
+                edits.addLayout(w, r, c + 1)
+            else:
+                edits.addWidget(w, r, c + 1)
+        edits.setColumnStretch(4, 1)
+        for w in (self.gain, self.trim_in, self.trim_out, self.fade_in, self.fade_out, self.offset):
+            w.setMaximumWidth(110)
+        self.take_box.setMinimumWidth(140)
 
         card = QFrame()
         card.setObjectName("well")
@@ -267,6 +274,7 @@ class RecordPanel(QWidget):
         lay.addLayout(form)
         lay.addWidget(card)
         lay.addLayout(btns)
+        lay.addLayout(btns2)
         lay.addLayout(take)
         lay.addLayout(edits)
         from .take_editor import TakeEditor

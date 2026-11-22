@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         self.f_char = QComboBox()
         self.f_char.setMinimumWidth(150)
         self.f_status = QComboBox()
-        for label, key in (("Все статусы", "*"), ("Нет записи", "none"),
+        for label, key in (("Все статусы", "*"), ("Не записаны", "none"),
                            ("Записаны, не проверены", "rec"), ("Одобрены", "ok"),
                            ("На переписку", "redo"), ("Без роли", "nochar"),
                            ("Выключены", "off"), ("Слишком быстрые", "fast")):
@@ -209,7 +209,7 @@ class MainWindow(QMainWindow):
         sl.setContentsMargins(0, 6, 0, 0)
         sl.setSpacing(28)
         self.stat_labels: dict[str, QLabel] = {}
-        for key, caption in (("ready", "записано"), ("none", "нет записи"), ("redo", "переписать"),
+        for key, caption in (("ready", "записано"), ("none", "не записано"), ("redo", "переписать"),
                              ("nochar", "без роли")):
             box = QVBoxLayout()
             box.setSpacing(0)
@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
         top.setStretchFactor(0, 3)
         top.setStretchFactor(1, 2)
         top.setSizes([860, 680])
+        self._top_split = top
         editor = QSplitter(Qt.Vertical)
         editor.addWidget(top)
         editor.addWidget(self.timeline)
@@ -698,7 +699,7 @@ class MainWindow(QMainWindow):
         for key in ("none", "redo", "nochar"):
             self.stat_labels[key].setText(str(counts.get(key, 0)))
         th = theme.current()
-        for key, col in (("none", th.error), ("redo", th.warn)):
+        for key, col in (("redo", th.warn),):
             self.stat_labels[key].setStyleSheet(f"color:{col}" if counts.get(key) else "")
 
     def _toggle_rythmo(self, on: bool):
@@ -2331,6 +2332,20 @@ class MainWindow(QMainWindow):
         if HotkeysDialog(self).exec():
             self.settings.save()
             self.apply_hotkeys()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_split_fixed", False):
+            self._split_fixed = True
+            QTimer.singleShot(0, self._fit_split)
+
+    def _fit_split(self):
+        """На узком экране правой колонке — не меньше, чем нужно вкладке «Запись»."""
+        sp = self._top_split
+        total = sum(sp.sizes())
+        need = 640
+        if total and sp.sizes()[1] < need and total - need >= self.player.minimumSizeHint().width():
+            sp.setSizes([total - need, need])
 
     def closeEvent(self, e):
         if self.task:

@@ -25,7 +25,7 @@ STATUS_TEXT = {
     "rec": "записано",
     "ok": "одобрено ✓",
     "redo": "переписать",
-    "none": "нет записи",
+    "none": "не записано",
     "nochar": "нет роли",
     "off": "выкл.",
 }
@@ -306,6 +306,11 @@ class RoleDelegate(QStyledItemDelegate):
 
 
 class LinesView(QTableView):
+    EMPTY_TEXT = ("Реплик пока нет.\n\nИмпортируйте субтитры (кнопка «Субтитры» вверху)\n"
+                  "или нажмите «Распознать», чтобы получить текст из звука.\n"
+                  "Добавить вручную — «+ Реплика» внизу или клавиша N.")
+    FILTERED_TEXT = "Нет реплик, подходящих под фильтр.\nИзмените поиск, персонажа или статус."
+
     """Таблица реплик с заметной рамкой вокруг выделенных строк.
 
     Фон выделения бывает едва отличим от строки, поэтому поверх рисуется рамка
@@ -313,8 +318,20 @@ class LinesView(QTableView):
 
     def paintEvent(self, e):
         super().paintEvent(e)
-        sm = self.selectionModel()
         model = self.model()
+        if model is not None and model.rowCount() == 0:   # подсказка вместо пустой таблицы
+            src = model.sourceModel() if hasattr(model, "sourceModel") else model
+            empty = src is None or src.rowCount() == 0
+            if src is not None and getattr(src, "project", None) is None:
+                return
+            p = QPainter(self.viewport())
+            p.setPen(QColor(theme.current().muted))
+            p.setFont(theme.body_font(theme.TEXT_MD))
+            p.drawText(self.viewport().rect().adjusted(20, 20, -20, -20), Qt.AlignCenter,
+                       self.EMPTY_TEXT if empty else self.FILTERED_TEXT)
+            p.end()
+            return
+        sm = self.selectionModel()
         if sm is None or model is None or model.columnCount() == 0:
             return
         rows = sorted({i.row() for i in sm.selectedRows()})

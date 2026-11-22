@@ -132,7 +132,7 @@ def current() -> Theme:
 
 def status_colors() -> dict[str, str]:
     t = _current
-    return {"rec": t.ink2, "ok": t.success, "redo": t.warn, "none": t.error,
+    return {"rec": t.ink2, "ok": t.success, "redo": t.warn, "none": t.muted,
             "nochar": t.muted, "off": t.muted}
 
 
