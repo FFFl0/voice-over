@@ -223,6 +223,11 @@ class MainWindow(QMainWindow):
             sl.addLayout(box)
             self.stat_labels[key] = fig
         sl.addStretch(1)
+        self.b_next_todo = QPushButton(theme.icon("mic"), " Записать следующую незаписанную")
+        self.b_next_todo.setToolTip("Перейти к ближайшей незаписанной реплике (или на переписку) "
+                                    "и открыть вкладку «Запись» (клавиша U)")
+        self.b_next_todo.clicked.connect(lambda: self.goto_next_todo(record=True))
+        sl.addWidget(self.b_next_todo)
 
         lines_tab = QWidget()
         ll = QVBoxLayout(lines_tab)
@@ -451,13 +456,17 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_cleanup)
 
         m = mb.addMenu("&Обработка")
-        for a in (self.a_track, self.a_whisper, self.a_diarize, self.a_translate, self.a_restore,
-                  self.a_separate, self.a_align):
-            m.addAction(a)
-        m.addAction(self.a_batch)
-        m.addSeparator()
-        m.addAction(self.a_preview)
-        m.addAction(self.a_preview_full)
+        # группы с заголовками: что делаем с текстом, со звуком, проверка
+        for title, acts in (("Текст", (self.a_whisper, self.a_diarize, self.a_translate,
+                                       self.a_restore)),
+                            ("Звук", (self.a_track, self.a_separate, self.a_align)),
+                            ("Проверка", (self.a_preview, self.a_preview_full)),
+                            ("Несколько серий", (self.a_batch,))):
+            if m.actions():
+                m.addSeparator()
+            m.addAction(menu_header(title, m))
+            for a in acts:
+                m.addAction(a)
 
         m = mb.addMenu("&Вид")
         self.a_rythmo = QAction("Ритмо-лента под видео", self, checkable=True)
@@ -484,6 +493,9 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_zoom_out)
 
         m = mb.addMenu("&Справка")
+        a_tips = QAction("Первые шаги", self)
+        a_tips.triggered.connect(self.show_first_tips)
+        m.addAction(a_tips)
         m.addAction(self.a_help)
         m.addAction(self.a_about)
         self._fill_recent()
@@ -685,6 +697,7 @@ class MainWindow(QMainWindow):
         if not self.project:
             for lbl in self.stat_labels.values():
                 lbl.setText("0")
+            self.b_next_todo.setEnabled(False)
             return
         counts: dict[str, int] = {}
         for ln in self.project.lines:
@@ -693,6 +706,7 @@ class MainWindow(QMainWindow):
         total = len(self.project.lines)
         ready = counts.get("rec", 0) + counts.get("ok", 0)
         self.stat_labels["ready"].setText(f"{ready} из {total}")
+        self.b_next_todo.setEnabled(bool(counts.get("none", 0) + counts.get("redo", 0)))
         todo = sum(1 for ln in self.project.lines if ln.enabled and ln.text.strip())
         self._progress = ready / todo if todo else None
         self._update_title()
@@ -802,6 +816,8 @@ class MainWindow(QMainWindow):
                     self.dirty = True
         self._load_waveform()
         self._update_now_line(0.0)
+        if p is not None and not self.settings.tips_shown:
+            QTimer.singleShot(400, self.show_first_tips)
         self._update_title()
         self._update_actions()
 
@@ -1718,6 +1734,68 @@ class MainWindow(QMainWindow):
         self.timeline.canvas.ensure_visible(m["t"], m["t"])
         self.statusBar().showMessage(f"Метка {fmt_clock(m['t'])}: {m['text']}", 6000)
 
+    FIRST_TIPS = [
+        ("Текст реплик", "Кнопка «Субтитры» — импорт SRT/ASS/VTT. Нет субтитров — «Распознать» "
+                         "получит текст из звука (проверьте его: распознавание ошибается)."),
+        ("Роли", "Выделите реплики одного персонажа и выберите его в списке «Роль» под таблицей. "
+                 "«Обработка → Роли по голосам» разложит реплики автоматически."),
+        ("Запись", "Вкладка «Запись», клавиша R: видео пойдёт с запасом, появится отсчёт, говорите "
+                   "на «Говорите». U — к следующей незаписанной реплике."),
+        ("Проверка", "F6 — превью минуты от курсора. P — послушать дубль, B — сравнить с "
+                     "оригиналом. S и M у дорожек — соло и заглушить роль."),
+        ("Готово", "«Экспорт» справа вверху — видео с новой дорожкой. Подробности — "
+                   "Справка → Как пользоваться, все клавиши — Вид → Горячие клавиши."),
+    ]
+
+    def show_first_tips(self):
+        """Короткая справка при первом проекте (потом — Справка → Первые шаги)."""
+        if not self.isVisible():
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Первые шаги")
+        lay = QVBoxLayout(dlg)
+        for i, (title, text) in enumerate(self.FIRST_TIPS, 1):
+            h = QLabel(f"{i}. {title}")
+            h.setObjectName("itemTitle")
+            t = QLabel(text)
+            t.setWordWrap(True)
+            t.setObjectName("muted")
+            lay.addWidget(h)
+            lay.addWidget(t)
+        from PySide6.QtWidgets import QCheckBox
+        again = QCheckBox("Показать снова при следующем проекте")
+        lay.addWidget(again)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok)
+        bb.button(QDialogButtonBox.Ok).setText("Понятно")
+        bb.accepted.connect(dlg.accept)
+        lay.addWidget(bb)
+        dlg.setMinimumWidth(520)
+        dlg.exec()
+        self.settings.tips_shown = not again.isChecked()
+        self.settings.save()
+
+    def goto_next_todo(self, record: bool = False):
+        """К следующей после текущей реплике без записи или на переписку (по кругу)."""
+        p = self.project
+        if not p:
+            return
+        todo = [ln for ln in p.lines if line_status(p, ln) in ("none", "redo")]
+        if not todo:
+            self.statusBar().showMessage("Все реплики записаны 🎉", 5000)
+            return
+        cur = self.current_line()
+        t = cur.start if cur else -1.0
+        nxt = next((ln for ln in todo if ln.start > t + 1e-6), todo[0])
+        if self.lines_filter.status not in ("*", "none", "redo") or \
+                self.lines_filter.character_id not in ("*", nxt.character_id):
+            self.f_status.setCurrentIndex(0)
+            self.f_char.setCurrentIndex(0)
+        self.select_line(nxt.id)
+        if record:
+            self.tabs.setCurrentIndex(2)
+        left = len(todo)
+        self.statusBar().showMessage(f"Осталось записать: {left}", 4000)
+
     def compare_ab(self, ln=None):
         """A/B: голос оригинала под репликой, пауза, затем дубль (как в сведении)."""
         from ..core.ab import build_ab
@@ -2229,7 +2307,11 @@ class MainWindow(QMainWindow):
     # ================================================================ прочее
     def open_settings(self):
         lang = self.settings.spell_lang
-        SettingsDialog(self.settings, self).exec()
+        dlg = SettingsDialog(self.settings, self)
+        if dlg.exec() and getattr(dlg, "new_theme", None):
+            if dlg.new_theme != self.settings.theme:
+                self.set_theme(dlg.new_theme)
+            self.a_rythmo.setChecked(self.settings.rythmo_band)
         ffmpeg.set_ffmpeg_path(self.settings.ffmpeg_path)
         if self.settings.spell_lang != lang:
             self.spell.set_language(self.settings.spell_lang)
@@ -2301,6 +2383,8 @@ class MainWindow(QMainWindow):
                 self.compare_ab()
             elif action in ("approve", "redo"):
                 self.set_review("ok" if action == "approve" else "redo")
+            elif action == "next_todo":
+                self.goto_next_todo(record=self._tab_is(self.record))
             elif action == "marker":
                 self.add_marker(self.player.position())
             elif action in ("prev_line", "next_line"):
@@ -2366,6 +2450,18 @@ class MainWindow(QMainWindow):
         self.settings.save()
         QApplication.instance().removeEventFilter(self)
         e.accept()
+
+
+def menu_header(title: str, menu) -> QAction:
+    """Заголовок группы в меню (некликабельная подпись)."""
+    from PySide6.QtWidgets import QWidgetAction
+    act = QWidgetAction(menu)
+    lbl = QLabel(title.upper())
+    lbl.setObjectName("label")
+    lbl.setContentsMargins(14, 6, 14, 2)
+    act.setDefaultWidget(lbl)
+    act.setEnabled(False)
+    return act
 
 
 def scrollable(w: QWidget) -> QWidget:

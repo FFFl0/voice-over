@@ -130,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
             win.open_project(str(p), ask=False)
         elif p.is_file():
             win.new_project(str(p))
-    return app.exec()
+    rc = app.exec()
+    # дождаться фоновых задач (волна, словарь, превью), иначе они могут обратиться к уже
+    # удалённым объектам при завершении Python
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(5000)
+    return rc
 
 
 if __name__ == "__main__":

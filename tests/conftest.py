@@ -2,6 +2,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _no_first_tips(monkeypatch):
+    """Окно «Первые шаги» модальное — в тестах его не показываем."""
+    from voiceover.ui import main_window
+    monkeypatch.setattr(main_window.MainWindow, "show_first_tips", lambda self: None)
+
+
+@pytest.fixture(autouse=True)
 def _offline_dictionaries(monkeypatch):
     """Тесты окна не должны скачивать словари орфографии из интернета:
     уже лежащие в папке словари (как в test_spell) работают, загрузка — нет."""
@@ -28,6 +35,8 @@ def pytest_sessionfinish(session, exitstatus):
     app = QApplication.instance()
     if app is None:
         return
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(10000)   # фоновые задачи — до удаления окон
     for w in QApplication.topLevelWidgets():
         try:
             if hasattr(w, "dirty"):

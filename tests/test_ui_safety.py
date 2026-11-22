@@ -169,3 +169,34 @@ def test_cast_between_episodes(win, tmp_path, monkeypatch):
     assert aki.actor == "Маша" and aki.color == "#123456"          # из состава
     assert ep2.character_by_name("Новенький").actor == ""            # нет в составе
     assert "Inazuma" in win.chars.cast_lbl.text()
+
+
+def test_next_todo(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QDialog
+    app = QApplication.instance() or QApplication([])
+    from voiceover.core.models import Line, Project
+    from voiceover.core.settings import AppSettings
+    from voiceover.ui.main_window import MainWindow
+    shown = []
+    monkeypatch.setattr(QDialog, "exec", lambda self: shown.append(self.windowTitle()) or 1)
+    s = AppSettings()
+    w = MainWindow(s)
+    (tmp_path / "v.mp4").write_bytes(b"")
+    p = Project(video_path=str(tmp_path / "v.mp4"), duration=20)
+    c = p.add_character("A")
+    p.lines += [Line(1, 2, "раз", c.id), Line(3, 4, "два", c.id, rec_path="nope.wav"),
+                Line(5, 6, "три", c.id)]
+    w.set_project(p)
+    w.select_line(p.lines[0].id, seek=False)
+    w.goto_next_todo(record=True)
+    assert w.current_line() is p.lines[1] and w.tabs.currentIndex() == 2   # файл записи не найден — не записано
+    w.goto_next_todo()
+    assert w.current_line() is p.lines[2]
+    w.goto_next_todo()
+    assert w.current_line() is p.lines[0]                                  # по кругу
+    assert w.b_next_todo.isEnabled()
+    w.dirty = False
+    w.close()
+    del app

@@ -586,7 +586,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.s = s
         self.setWindowTitle("Настройки")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(600)
         self.ff = QLineEdit(s.ffmpeg_path)
         self.ff.setPlaceholderText("автоматически")
         self.demucs_model = QComboBox()
@@ -605,12 +605,40 @@ class SettingsDialog(QDialog):
         self.ff_status = QLabel()
         self.ff_status.setWordWrap(True)
 
+        # все настройки программы в одном окне, по разделам
+        self.theme_box = QComboBox()
+        self.theme_box.addItem("Тёмная", "dark")
+        self.theme_box.addItem("Светлая", "light")
+        self.theme_box.setCurrentIndex(max(0, self.theme_box.findData(s.theme)))
+        self.rythmo = QCheckBox("Ритмо-лента под видео (Ctrl+B)")
+        self.rythmo.setChecked(s.rythmo_band)
+        self.hotkeys_btn = QPushButton("Горячие клавиши…")
+        self.hotkeys_btn.setEnabled(hasattr(parent, "edit_hotkeys"))
+        self.hotkeys_btn.clicked.connect(lambda: parent.edit_hotkeys())
+        self.loudness = QComboBox()
+        for value, title in ffmpeg.LOUDNESS_PRESETS:
+            self.loudness.addItem(title, value)
+        self.loudness.setCurrentIndex(max(0, self.loudness.findData(s.export_loudness)))
+
+        def section(title: str):
+            lbl = QLabel(title)
+            lbl.setObjectName("itemTitle")
+            f.addRow(lbl)
+
         f = QFormLayout()
-        f.addRow("FFmpeg:", path_row(self.ff, "ffmpeg.exe", "ffmpeg (ffmpeg*);;Все файлы (*)", parent=self))
-        f.addRow("", self.ff_status)
+        section("Внешний вид")
+        f.addRow("Тема:", self.theme_box)
+        f.addRow(self.rythmo)
+        f.addRow("Клавиши:", self.hotkeys_btn)
+        section("Запись")
+        f.addRow("Запись после реплики:", self.postroll)
+        section("Звук и экспорт")
+        f.addRow("Громкость при экспорте:", self.loudness)
         f.addRow("Модель Demucs:", self.demucs_model)
         f.addRow("Устройство Demucs:", self.device)
-        f.addRow("Запись после реплики:", self.postroll)
+        f.addRow("FFmpeg:", path_row(self.ff, "ffmpeg.exe", "ffmpeg (ffmpeg*);;Все файлы (*)", parent=self))
+        f.addRow("", self.ff_status)
+        section("Текст")
         from .spell_ui import LANG_TITLES
         self.spell = QComboBox()
         for k in ("ru", "en", "uk", ""):
@@ -642,6 +670,9 @@ class SettingsDialog(QDialog):
         self.s.demucs_device = self.device.currentData()
         self.s.record_postroll = self.postroll.value()
         self.s.spell_lang = self.spell.currentData()
+        self.s.export_loudness = self.loudness.currentData()
+        self.s.rythmo_band = self.rythmo.isChecked()
+        self.new_theme = self.theme_box.currentData()
         self.s.save()
         self.accept()
 

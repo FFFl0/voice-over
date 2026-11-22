@@ -5,11 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QPushButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
 from . import theme
+
+
+def project_summary(path: str) -> str:
+    """Короткая сводка проекта для списка недавних: прогресс записи."""
+    import json
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "файл не найден"
+    except Exception:  # noqa: BLE001
+        return "не удалось прочитать"
+    lines = [ln for ln in d.get("lines", []) if ln.get("enabled", True) and
+             str(ln.get("text", "")).strip()]
+    if not lines:
+        return "реплик пока нет"
+    done = sum(1 for ln in lines if ln.get("rec_path") and ln.get("review") != "redo")
+    return f"записано {done} из {len(lines)} ({done * 100 // len(lines)}%)"
 
 
 class WelcomePage(QWidget):
@@ -121,10 +139,13 @@ class WelcomePage(QWidget):
 
     def set_recent(self, paths: list[str]):
         self.recent.clear()
-        for p in paths:
-            it = QListWidgetItem(f"{Path(p).stem}\n{Path(p).parent}")
+        for p in paths[:6]:
+            info = project_summary(p)
+            it = QListWidgetItem(f"{Path(p).stem}   ·   {info}\n{Path(p).parent}")
             it.setData(Qt.UserRole, p)
             it.setToolTip(p)
+            if info == "файл не найден":
+                it.setForeground(QColor(theme.current().muted))
             self.recent.addItem(it)
         self.recent.setVisible(bool(paths))
         self.recent_title.setVisible(bool(paths))
