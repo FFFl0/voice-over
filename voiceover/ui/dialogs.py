@@ -22,6 +22,77 @@ VIDEO_FILTER = "Видео (*.mkv *.mp4 *.avi *.mov *.webm *.m4v *.ts *.m2ts *.w
 SUB_FILTER = "Субтитры (*.srt *.ass *.ssa *.vtt);;Все файлы (*)"
 
 
+TRACK_LANGUAGES = [("rus", "Русский"), ("ukr", "Украинский"), ("bel", "Белорусский"),
+                   ("kaz", "Казахский"), ("eng", "Английский"), ("jpn", "Японский"),
+                   ("kor", "Корейский"), ("chi", "Китайский"), ("deu", "Немецкий"),
+                   ("fra", "Французский"), ("spa", "Испанский"), ("ita", "Итальянский"),
+                   ("por", "Португальский"), ("pol", "Польский"), ("tur", "Турецкий"),
+                   ("und", "Не указан")]
+
+
+def collapse_button(text: str):
+    from PySide6.QtWidgets import QToolButton
+    b = QToolButton()
+    b.setObjectName("optsToggle")
+    b.setText(text)
+    b.setCheckable(True)
+    b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    return b
+
+
+def bind_collapse(btn, box: QWidget, opened: bool) -> None:
+    def toggle(on: bool):
+        box.setVisible(on)
+        btn.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
+        w = btn.window()
+        if w is not None and w.isVisible():
+            w.adjustSize()
+    btn.toggled.connect(toggle)
+    btn.setChecked(opened)
+    toggle(opened)
+
+
+class ElidedLabel(QLabel):
+    """Метка, сокращающая длинный текст посередине под свою ширину."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full = ""
+        self.setMinimumWidth(10)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def set_full(self, text: str) -> None:
+        self._full = text
+        self.setToolTip(text)
+        self._apply()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._apply()
+
+    def _apply(self):
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.ElideMiddle,
+                                                      max(10, self.width() - 2)))
+
+
+def path_hint(edit: QLineEdit) -> QLabel:
+    """Под полем пути — папка (с сокращением в середине) и полный путь в подсказке:
+    в узком поле видно только начало или конец длинного пути."""
+    lbl = ElidedLabel()
+    lbl.setObjectName("muted")
+    lbl.setTextFormat(Qt.PlainText)
+
+    def upd(*_):
+        t = edit.text().strip()
+        edit.setToolTip(t)
+        lbl.set_full(f"Папка: {Path(t).parent}" if t else "")
+        edit.setCursorPosition(len(t))   # видно имя файла
+    edit.textChanged.connect(upd)
+    upd()
+    return lbl
+
+
 def path_row(edit: QLineEdit, caption: str, filt: str, save: bool = False,
              parent: Optional[QWidget] = None) -> QHBoxLayout:
     btn = QPushButton("Обзор…")
@@ -62,6 +133,7 @@ class NewProjectDialog(QDialog):
 
         f = QFormLayout()
         f.addRow("Видео:", path_row(self.video, "Выберите видео", VIDEO_FILTER, parent=self))
+        f.addRow("", path_hint(self.video))
         f.addRow("", self.info_lbl)
         f.addRow("Аудиодорожка:", self.stream)
         f.addRow("Субтитры:", path_row(self.subs, "Субтитры", SUB_FILTER, parent=self))
@@ -239,6 +311,9 @@ class MixPanel(QWidget):
         self.bg_status = QLabel()
         self.bg_status.setWordWrap(True)
         f = QFormLayout(self)
+        f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)   # поля по размеру значения
+        for w in (self.duck, self.attack, self.release, self.bg, self.voices, self.denoise):
+            w.setMinimumWidth(110)
         f.addRow("Режим:", self.mode)
         f.addRow(self.bg_status)
         f.addRow(self.only_lines)
@@ -379,9 +454,10 @@ class ExportDialog(QDialog):
         self.keep_subs = QCheckBox("Сохранить субтитры из исходного видео")
         self.keep_subs.setChecked(True)
         self.title = QLineEdit("Многоголосая озвучка")
-        self.lang = QLineEdit("rus")
-        self.lang.setMaxLength(3)
-        self.lang.setFixedWidth(60)
+        self.lang = QComboBox()
+        for code, name in TRACK_LANGUAGES:
+            self.lang.addItem(f"{name} ({code})", code)
+        self.lang.setToolTip("Язык дорожки — плееры показывают его в списке звуковых дорожек")
         self.loudness = QComboBox()
         for value, title in ffmpeg.LOUDNESS_PRESETS:
             self.loudness.addItem(title, value)
@@ -396,15 +472,25 @@ class ExportDialog(QDialog):
         f = QFormLayout()
         f.addRow("Что сохранить:", self.kind)
         f.addRow("Файл:", row)
+        self.out_dir = path_hint(self.out)
+        f.addRow("", self.out_dir)
         f.addRow("Контейнер:", self.container)
-        f.addRow("Кодек звука:", self.codec)
-        f.addRow("Битрейт:", self.bitrate)
-        f.addRow("Название дорожки:", self.title)
-        f.addRow("Язык (ISO 639-2):", self.lang)
         f.addRow("Громкость:", self.loudness)
         f.addRow(self.keep_orig)
-        f.addRow(self.all_orig)
-        f.addRow(self.keep_subs)
+        # редко нужные настройки — в раскрывающемся блоке
+        self.adv_toggle = collapse_button("Дополнительно: кодек, битрейт, название и язык дорожки")
+        self.adv = QWidget()
+        af = QFormLayout(self.adv)
+        af.setContentsMargins(0, 0, 0, 0)
+        af.addRow("Кодек звука:", self.codec)
+        af.addRow("Битрейт:", self.bitrate)
+        af.addRow("Название дорожки:", self.title)
+        af.addRow("Язык дорожки:", self.lang)
+        af.addRow(self.all_orig)
+        af.addRow(self.keep_subs)
+        f.addRow(self.adv_toggle)
+        f.addRow(self.adv)
+        bind_collapse(self.adv_toggle, self.adv, False)
 
         # оформление: видео перекодируется (дольше, чем простая сборка)
         self.brand = QGroupBox("Оформление (видео будет перекодировано — это дольше)")
@@ -436,7 +522,10 @@ class ExportDialog(QDialog):
         g.addRow(self.burn)
         g.addRow("Заставка:", path_row(self.intro, "Заставка", "Видео (*.mp4 *.mkv *.mov *.webm)",
                                        parent=self))
+        self.brand_toggle = collapse_button("Оформление: логотип, вшитые субтитры, заставка")
+        f.addRow(self.brand_toggle)
         f.addRow(self.brand)
+        bind_collapse(self.brand_toggle, self.brand, False)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Экспортировать")
         bb.button(QDialogButtonBox.Ok).setProperty("primary", True)
@@ -482,7 +571,7 @@ class ExportDialog(QDialog):
             all_originals=self.all_orig.isChecked(),
             keep_subtitles=self.keep_subs.isChecked(),
             track_title=self.title.text().strip() or "Озвучка",
-            language=(self.lang.text().strip() or "rus")[:3],
+            language=self.lang.currentData() or "rus",
             logo=self.logo.text().strip(),
             logo_pos=self.logo_pos.currentData(),
             logo_size=self.logo_size.value() / 100,

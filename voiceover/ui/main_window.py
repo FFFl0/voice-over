@@ -2170,6 +2170,8 @@ class MainWindow(QMainWindow):
         dlg.logo.setText(self.settings.export_logo)
         dlg.logo_pos.setCurrentIndex(max(0, dlg.logo_pos.findData(self.settings.export_logo_pos)))
         dlg.intro.setText(self.settings.export_intro)
+        if self.settings.export_logo or self.settings.export_intro:
+            dlg.brand_toggle.setChecked(True)   # оформление уже настроено — показать его
         if dlg.exec() != QDialog.Accepted:
             return
         opts = dlg.options()

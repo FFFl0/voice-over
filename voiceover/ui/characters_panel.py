@@ -146,6 +146,11 @@ class CharactersPanel(QWidget):
         self.btn_lines = QPushButton(theme.icon("list"), " Показать реплики")
         self.count_lbl = QLabel()
 
+        f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        for w in (self.name, self.actor):
+            w.setMinimumWidth(280)
+        self.effect.setMinimumWidth(220)
+        self.volume.setMinimumWidth(110)
         f.addRow("Имя:", self.name)
         f.addRow("Цвет:", self.color_btn)
         f.addRow("Актёр:", self.actor)
@@ -204,7 +209,7 @@ class CharactersPanel(QWidget):
                 it = QListWidgetItem(c.name)
                 it.setData(Qt.UserRole + 1, c.color)
                 it.setData(Qt.UserRole + 2, f"записано {recorded.get(c.id, 0)} из {n}")
-                it.setData(Qt.UserRole + 3, c.actor or "актёр не указан")
+                it.setData(Qt.UserRole + 3, c.actor)   # пусто — ничего не пишем
                 it.setData(Qt.UserRole + 4, recorded.get(c.id, 0) / n if n else 0.0)
                 it.setData(Qt.UserRole, c.id)
                 self.list.addItem(it)
