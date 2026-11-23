@@ -2393,6 +2393,13 @@ class MainWindow(QMainWindow):
             text = (folder / "THIRD_PARTY.md").read_text(encoding="utf-8")
         except OSError:
             text = "licenses/THIRD_PARTY.md not found"
+        from ..core.spell import downloaded_notices
+        notices = downloaded_notices()
+        if notices:
+            text += "\n\n## Spelling dictionaries on this computer — full notices\n"
+            for name, body in notices:
+                fence = "~~~~" if "```" in body else "```"
+                text += f"\n### {name}\n\n{fence}\n{body.rstrip()}\n{fence}\n"
         dlg = QDialog(self)
         dlg.setWindowTitle("Сторонние компоненты")
         dlg.resize(820, 600)

@@ -60,3 +60,62 @@ def test_steam_vdf(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(SystemExit):
         make_vdf.main(["make_vdf.py", "abc", "1"])
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+    def read(self):
+        return self.data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_dictionary_notice_downloaded_with_dictionary(tmp_path, monkeypatch):
+    from voiceover.core import spell
+    urls = []
+
+    def fake_urlopen(url, timeout=0):
+        urls.append(url)
+        if url.endswith("README_ru_RU.txt"):
+            return _Resp("Copyright (c) 1997-2008, Alexander I. Lebedev\n".encode())
+        return _Resp(b"1\nslovo\n")
+
+    monkeypatch.setattr(spell.urllib.request, "urlopen", fake_urlopen)
+    from voiceover.core.spell import ensure_notice, downloaded_notices
+    (tmp_path / "ru_RU.dic").write_text("1\nslovo\n")
+    assert downloaded_notices(tmp_path) == []          # README ещё не скачан
+    assert ensure_notice("ru", tmp_path).name == "README_ru_RU.txt"
+    assert urls[-1].endswith("/ru_RU/README_ru_RU.txt")
+    assert downloaded_notices(tmp_path) == [("README_ru_RU.txt",
+                                             "Copyright (c) 1997-2008, Alexander I. Lebedev\n")]
+    n = len(urls)
+    ensure_notice("ru", tmp_path)                       # уже есть — не качаем снова
+    assert len(urls) == n
+
+
+def test_dictionary_notice_offline_is_harmless(tmp_path, monkeypatch):
+    from voiceover.core import spell
+
+    def offline(url, timeout=0):
+        raise OSError("no network")
+
+    monkeypatch.setattr(spell.urllib.request, "urlopen", offline)
+    assert spell.ensure_notice("en", tmp_path) is None
+    assert not list(tmp_path.iterdir())
+
+
+def test_licenses_include_model_and_dictionary_texts():
+    from voiceover.edition import licenses_dir
+    d = licenses_dir()
+    third = (d / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    assert (d / "CC-BY-4.0.txt").read_text().startswith("Creative Commons Attribution 4.0")
+    assert "Mozilla Public License" in (d / "MPL-1.1.txt").read_text()
+    for s in ("wespeaker-voxceleb-resnet34-LM", "CC-BY-4.0.txt", "Alexander I. Lebedev",
+              "Kevin Atkinson", "J Ross Beresford", "Andriy Rysin", "MPL-1.1.txt"):
+        assert s in third, s

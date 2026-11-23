@@ -15,6 +15,8 @@ from typing import Iterable, Optional
 ACCENT = "́"
 BASE_URL = "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/"
 LANGS = {"ru": ("ru_RU", "ru_RU"), "en": ("en", "en_US"), "uk": ("uk_UA", "uk_UA")}
+# Лицензия и авторы словаря — скачиваются вместе с ним и показываются в «Сторонних компонентах»
+# (условие некоторых словарей: уведомление должно быть рядом с использованием)
 WORD_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|́)*(?:-[^\W\d_](?:[^\W\d_]|́)*)*")
 _CYR = re.compile(r"[а-яёА-ЯЁіїєґІЇЄҐ]")
 _LAT = re.compile(r"[A-Za-z]")
@@ -43,7 +45,43 @@ def ensure_dictionary(lang: str, folder: Optional[Path] = None) -> Path:
             with urllib.request.urlopen(f"{BASE_URL}{sub}/{name}{ext}", timeout=60) as r:
                 tmp.write_bytes(r.read())
             tmp.replace(p)
+    ensure_notice(lang, d)
     return base
+
+
+def notice_path(lang: str, folder: Optional[Path] = None) -> Path:
+    _sub, name = LANGS[lang]
+    return (folder or dict_dir()) / f"README_{name}.txt"
+
+
+def ensure_notice(lang: str, folder: Optional[Path] = None) -> Optional[Path]:
+    """Скачать README словаря (лицензия, авторы). Без сети — не мешает проверке орфографии."""
+    p = notice_path(lang, folder)
+    if p.exists() and p.stat().st_size > 0:
+        return p
+    sub, name = LANGS[lang]
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}{sub}/README_{name}.txt", timeout=60) as r:
+            data = r.read()
+    except Exception:  # noqa: BLE001  повторим при следующем запуске проверки
+        return None
+    tmp = p.with_suffix(".part")
+    tmp.write_bytes(data)
+    tmp.replace(p)
+    return p
+
+
+def downloaded_notices(folder: Optional[Path] = None) -> list[tuple[str, str]]:
+    """(имя файла, текст) README скачанных словарей — для окна «Сторонние компоненты»."""
+    out = []
+    for lang, (_sub, name) in LANGS.items():
+        d = folder or dict_dir()
+        if not (d / f"{name}.dic").exists():
+            continue
+        p = notice_path(lang, d)
+        if p.exists():
+            out.append((p.name, p.read_bytes().decode("utf-8", errors="replace")))
+    return out
 
 
 class SpellChecker:

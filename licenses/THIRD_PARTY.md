@@ -31,9 +31,41 @@ Settings → FFmpeg).
 
 ## Downloaded on first use (not included in the program)
 
-| Data | Source | License (as published by the authors) |
-|---|---|---|
-| Speech recognition model Whisper large-v3-turbo (CTranslate2) | Hugging Face | MIT |
-| Voice separation model htdemucs | facebookresearch/demucs | MIT |
-| Speaker model WeSpeaker voxceleb-resnet34-LM | Hugging Face `Wespeaker/wespeaker-voxceleb-resnet34-LM` | see the model card |
-| Spelling dictionaries ru_RU, en_US, uk_UA | LibreOffice/dictionaries | see the README of each dictionary |
+These files are downloaded to `%APPDATA%\VoiceOverStudio` when the feature is first used.
+They are used unmodified.
+
+### Speaker model — WeSpeaker voxceleb-resnet34-LM
+
+- Source: https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM
+- License: Creative Commons Attribution 4.0 International (`CC-BY-4.0.txt`). Per the
+  WeSpeaker documentation, models trained on VoxCeleb follow the license of the VoxCeleb dataset.
+- Authors: the WeSpeaker project (wenet-e2e), https://github.com/wenet-e2e/wespeaker —
+  H. Wang et al., "WeSpeaker: A Research and Production oriented Speaker Embedding Learning
+  Toolkit", arXiv:2210.17016.
+- Training data: VoxCeleb1/VoxCeleb2 — A. Nagrani, J. S. Chung, A. Zisserman et al.,
+  Visual Geometry Group, University of Oxford.
+- The model is used unmodified.
+
+### Speech recognition model — Whisper large-v3-turbo (CTranslate2 conversion)
+
+- Whisper by OpenAI, MIT License; CTranslate2 conversion for faster-whisper, MIT License.
+
+### Voice separation model — Demucs htdemucs
+
+- Demucs by Meta AI Research (A. Défossez), https://github.com/facebookresearch/demucs, MIT License.
+
+### Spelling dictionaries — LibreOffice/dictionaries
+
+The full notice of each dictionary (`README_*.txt`) is downloaded together with it and shown in
+*About → Third-party components*.
+
+- **Russian (ru_RU)** — Copyright (c) 1997-2008, Alexander I. Lebedev. Redistribution and use
+  are permitted under the conditions in `README_ru_RU.txt`; the dictionary is provided "as is",
+  without warranty (full disclaimer in `README_ru_RU.txt`).
+- **English (en_US)** — from SCOWL, Copyright 2000-2018 by Kevin Atkinson, and other sources:
+  Ispell affix file (Geoff Kuenning, BSD license), VarCon (Benjamin Titze), WordNet 1.6
+  (Princeton University), the UK Advanced Cryptics Dictionary (J Ross Beresford), and public-domain word lists (Moby, 12Dicts, ENABLE). The complete notices,
+  including the UK Advanced Cryptics Dictionary notice verbatim, are in `README_en_US.txt`.
+- **Ukrainian (uk_UA)** — Mozilla Public License 1.1 (`MPL-1.1.txt`). Andriy Rysin, 2007–2017;
+  based on the dict_uk project (VESUM), https://github.com/brown-uk/dict_uk. Source code of the
+  dictionary: https://github.com/LibreOffice/dictionaries/tree/master/uk_UA
