@@ -94,6 +94,9 @@ def install_russian(app) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv if argv is None else argv
+    import os
+    # Программа ничего не сообщает о пользователе: без телеметрии Hugging Face (скачивание моделей)
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     if len(args) > 2 and args[1] == "--separate-worker":   # дочерний процесс Demucs (.exe)
         import os
         os.environ.setdefault("TQDM_DISABLE", "1")
