@@ -1,13 +1,8 @@
-"""Машинный перевод реплик через бесплатный Google Переводчик (без ключа).
+"""Машинный перевод реплик: DeepL, Google Cloud Translation (по ключу пользователя)
+или локальная модель NLLB-200.
 
-Как устроено, чтобы Google не блокировал по частоте запросов:
-- реплики отправляются пачками до ~4000 символов, склеенными переводом строки, —
-  на фильм в 400 реплик уходит несколько запросов, а не сотни;
-- запрос — POST к JSON-интерфейсу translate.googleapis.com: он сохраняет переводы
-  строк, поэтому пачка возвращается с тем же числом строк;
-- между запросами выдерживается пауза, а ответ «слишком много запросов» (429)
-  приводит к ожиданию с нарастающей паузой, а не к ошибке;
-- если число строк всё же не совпало, пачка делится пополам, а не на отдельные строки;
+- реплики отправляются пачками, а не по одной;
+- ответ «слишком много запросов» (429) приводит к ожиданию с нарастающей паузой;
 - если перевод прервался, уже переведённые реплики возвращаются (PartialTranslation).
 """
 
@@ -30,7 +25,6 @@ LANGUAGES = [
 ]
 
 CHUNK_CHARS = 4000
-GTX_URL = "https://translate.googleapis.com/translate_a/single"
 
 
 class Translator(Protocol):
@@ -58,82 +52,20 @@ def translator_available() -> tuple[bool, str]:
     return True, ""
 
 
-def parse_gtx(data) -> str:
-    """Ответ translate_a/single: [[["перевод", "оригинал", ...], ...], ...]."""
-    if not isinstance(data, list) or not data or not isinstance(data[0], list):
-        raise RuntimeError("Неожиданный ответ переводчика")
-    return "".join(seg[0] for seg in data[0] if isinstance(seg, list) and seg and seg[0])
+def engines() -> list[str]:
+    """Доступные переводчики. Локальная NLLB — только вне сборки для магазинов:
+    лицензия модели (CC-BY-NC 4.0) не разрешает коммерческое использование."""
+    from ..edition import is_store
+    return (["deepl", "gcloud"] if is_store() else ["local", "deepl", "gcloud"])
 
 
-class GoogleFree:
-    """Бесплатный Google Переводчик (тот же интерфейс, что у браузерных расширений)."""
-
-    def __init__(self, source: str, target: str, min_interval: float = 0.6,
-                 max_waits: int = 6, post: Optional[Callable] = None,
-                 sleep: Callable[[float], None] = time.sleep,
-                 on_wait: Optional[Callable[[float], None]] = None,
-                 cancel: Optional[Callable[[], bool]] = None):
-        self.source = source or "auto"
-        self.target = target
-        self.min_interval = min_interval
-        self.max_waits = max_waits
-        self.sleep = sleep
-        self.on_wait = on_wait
-        self.cancel = cancel
-        self._last = 0.0
-        if post is None:
-            import requests
-            session = requests.Session()
-            session.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            post = session.post
-        self.post = post
-
-    def _pause(self, seconds: float) -> None:
-        """Пауза короткими шагами, чтобы её можно было прервать кнопкой «Отмена»."""
-        left = seconds
-        while left > 0:
-            if self.cancel and self.cancel():
-                raise Cancelled()
-            step = min(0.25, left)
-            self.sleep(step)
-            left -= step
-
-    def translate(self, text: str) -> str:
-        if not text.strip():
-            return text
-        wait = 5.0
-        for attempt in range(self.max_waits + 1):
-            gap = self.min_interval - (time.monotonic() - self._last)
-            if gap > 0:
-                self._pause(gap)
-            self._last = time.monotonic()
-            try:
-                r = self.post(GTX_URL, params={"client": "gtx", "sl": self.source,
-                                               "tl": self.target, "dt": "t"},
-                              data={"q": text}, timeout=30)
-            except Exception as e:  # noqa: BLE001  сеть
-                if attempt >= 2:
-                    raise RuntimeError(f"Нет связи с Google Переводчиком: {e}") from e
-                self._pause(3.0)
-                continue
-            if r.status_code in (429, 503):       # «слишком много запросов» — ждём
-                if attempt >= self.max_waits:
-                    break
-                if self.on_wait:
-                    self.on_wait(wait)
-                self._pause(wait)
-                wait = min(wait * 2, 120.0)
-                continue
-            if r.status_code >= 400:
-                raise RuntimeError(f"Google Переводчик ответил ошибкой {r.status_code}")
-            return parse_gtx(r.json())
-        raise RateLimited("Google Переводчик временно ограничил число запросов. "
-                          "Подождите несколько минут и запустите перевод снова — "
-                          "уже переведённые реплики сохранены и будут пропущены.")
-
-
-def google_translator(source: str, target: str, on_wait=None, cancel=None) -> Translator:
-    return GoogleFree(source, target, on_wait=on_wait, cancel=cancel)
+def default_engine(saved: str) -> str:
+    avail = engines()
+    if saved in avail:
+        return saved
+    if "local" in avail and nllb_available()[0]:
+        return "local"
+    return "deepl"
 
 
 def _chunks(texts: list[str], limit: int = CHUNK_CHARS) -> list[list[int]]:
@@ -180,7 +112,7 @@ def translate_texts(texts: list[str], translator: Translator,
     count = 0
     batch = getattr(translator, "translate_batch", None)
     if batch is not None:
-        # Пакетные движки (локальная модель, DeepL) получают реплики списком, без склейки
+        # Пакетные движки (локальная модель, DeepL, Google Cloud) получают реплики списком, без склейки
         size = getattr(translator, "batch_size", 16)
         groups = [list(range(k, min(k + size, len(todo)))) for k in range(0, len(todo), size)]
     for g in groups:
@@ -449,6 +381,62 @@ class DeepLApi:
                 raise RuntimeError(f"DeepL ответил ошибкой {r.status_code}")
             return [x["text"] for x in r.json()["translations"]]
         raise RateLimited("DeepL временно ограничил число запросов, попробуйте позже")
+
+    def translate(self, text: str) -> str:
+        return self.translate_batch([text])[0]
+
+
+# ============================================================================ Google Cloud
+
+GCLOUD_URL = "https://translation.googleapis.com/language/translate/v2"
+
+
+class GoogleCloudApi:
+    """Официальный Google Cloud Translation (Basic, v2) по ключу API пользователя."""
+
+    batch_size = 64          # до 128 строк в запросе
+
+    def __init__(self, key: str, source: str, target: str, post: Optional[Callable] = None,
+                 sleep: Callable[[float], None] = time.sleep,
+                 on_wait: Optional[Callable[[float], None]] = None):
+        if not key.strip():
+            raise RuntimeError("Не указан ключ Google Cloud Translation API")
+        self.key = key.strip()
+        self.source = None if source in ("auto", "", None) else source
+        self.target = target
+        self.sleep = sleep
+        self.on_wait = on_wait
+        if post is None:
+            import requests
+            post = requests.Session().post
+        self.post = post
+
+    def translate_batch(self, texts: list[str]) -> list[str]:
+        body = {"q": texts, "target": self.target, "format": "text"}
+        if self.source:
+            body["source"] = self.source
+        wait = 5.0
+        for _ in range(6):
+            r = self.post(GCLOUD_URL, params={"key": self.key}, json=body, timeout=60)
+            if r.status_code in (429, 503):
+                if self.on_wait:
+                    self.on_wait(wait)
+                self.sleep(wait)
+                wait = min(wait * 2, 60.0)
+                continue
+            if r.status_code in (400, 401, 403):
+                try:
+                    msg = r.json()["error"]["message"]
+                except Exception:  # noqa: BLE001
+                    msg = f"ошибка {r.status_code}"
+                raise RuntimeError("Google Cloud Translation: " + msg + "\n\nПроверьте ключ и что "
+                                   "в проекте Google Cloud включён Cloud Translation API.")
+            if r.status_code >= 400:
+                raise RuntimeError(f"Google Cloud Translation ответил ошибкой {r.status_code}")
+            import html
+            return [html.unescape(x["translatedText"]) for x in r.json()["data"]["translations"]]
+        raise RateLimited("Google Cloud Translation временно ограничил число запросов, "
+                          "попробуйте позже")
 
     def translate(self, text: str) -> str:
         return self.translate_batch([text])[0]

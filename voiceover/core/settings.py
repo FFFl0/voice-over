@@ -42,9 +42,10 @@ class AppSettings:
     export_intro: str = ""          # заставка перед фильмом
     translate_source: str = "auto"
     translate_target: str = "ru"
-    translate_engine: str = ""      # local | google | deepl ("" — выбрать автоматически)
+    translate_engine: str = ""      # local | deepl | gcloud ("" — выбрать автоматически)
     nllb_size: str = "600M"
     deepl_key: str = ""
+    gcloud_key: str = ""            # ключ Google Cloud Translation API
     recent: list[str] = field(default_factory=list)
     hotkeys: dict = field(default_factory=dict)   # свои горячие клавиши: ключ → сочетание
 

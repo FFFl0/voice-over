@@ -41,7 +41,9 @@ def find_ffmpeg() -> str:
     exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     if _ffmpeg_override and Path(_ffmpeg_override).is_file():
         return _ffmpeg_override
-    for cand in (_app_dir() / "ffmpeg" / "bin" / exe, _app_dir() / "ffmpeg" / exe, _app_dir() / exe):
+    bundled = Path(getattr(sys, "_MEIPASS", _app_dir()))    # LGPL-сборка внутри .exe-папки
+    for cand in (_app_dir() / "ffmpeg" / "bin" / exe, _app_dir() / "ffmpeg" / exe, _app_dir() / exe,
+                 bundled / "ffmpeg" / "bin" / exe):
         if cand.is_file():
             return str(cand)
     found = shutil.which("ffmpeg")
@@ -316,6 +318,36 @@ def has_filter(name: str) -> bool:
     return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", out, re.M) is not None
 
 
+_encoders_cache: dict[str, str] = {}
+
+
+def has_encoder(name: str) -> bool:
+    exe = find_ffmpeg()
+    if exe not in _encoders_cache:
+        try:
+            _encoders_cache[exe] = subprocess.run(
+                [exe, "-hide_banner", "-encoders"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", **_popen_kwargs()).stdout
+        except Exception:  # noqa: BLE001
+            _encoders_cache[exe] = ""
+    return re.search(rf"^\s*V\S*\s+{re.escape(name)}\s", _encoders_cache[exe], re.M) is not None
+
+
+def h264_args(crf: int, width: int, height: int, fps: float) -> list[str]:
+    """Параметры видеокодировщика. libx264 (GPL) есть только в FFmpeg, который пользователь
+    поставил сам; в поставляемой LGPL-сборке — OpenH264 или кодировщик Windows (Media
+    Foundation). Им качество задаётся битрейтом: он подбирается по размеру кадра и crf."""
+    if has_encoder("libx264"):
+        return ["-c:v", "libx264", "-preset", "medium", "-crf", str(crf)]
+    bpp = 0.1 * 2 ** ((20 - crf) / 6)                 # бит на пиксель; crf 20 ≈ 5 Мбит/с для 1080p25
+    kbps = int(max(800, min(40000, width * height * max(fps, 1.0) * bpp / 1000)))
+    rate = ["-b:v", f"{kbps}k", "-maxrate", f"{kbps * 3 // 2}k", "-bufsize", f"{kbps * 2}k"]
+    for enc in ("libopenh264", "h264_mf"):
+        if has_encoder(enc):
+            return ["-c:v", enc] + rate
+    return ["-c:v", "mpeg4", "-q:v", str(max(2, min(10, crf // 5)))]
+
+
 def filter_name(name: str) -> str:
     """Имя файла для параметра фильтра: FFmpeg запускается из папки файла, поэтому путь
     с буквой диска и спецсимволами в граф фильтров не попадает; само имя экранируем."""
@@ -392,8 +424,7 @@ def _mux_reencode(video: str, mix_wav: str, out_path: str, opts: ExportOptions,
     keep_subs = opts.keep_subtitles and not opts.intro   # после заставки они бы съехали
     if keep_subs:
         args += ["-map", "0:s?"]
-    args += ["-c:v", "libx264", "-preset", "medium", "-crf", str(opts.crf),
-             "-pix_fmt", "yuv420p", "-c:a:0", enc]
+    args += h264_args(opts.crf, vw, vh, fps) + ["-pix_fmt", "yuv420p", "-c:a:0", enc]
     if opts.codec != "flac":
         args += ["-b:a:0", opts.bitrate]
     # после заставки дорожки сдвинуты фильтром — их нужно перекодировать

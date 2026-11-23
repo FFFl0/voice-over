@@ -68,7 +68,6 @@
  "F6 — превью минуты от курсора. P — послушать дубль, B — сравнить с оригиналом. S и M у дорожек — соло и заглушить роль.": "F6 — preview a minute from the cursor. P — listen to the take, B — compare with the original. S and M on the lanes — solo and mute a role.",
  "FFmpeg не найден. Установите FFmpeg (https://ffmpeg.org), положите его в папку «ffmpeg» рядом с программой или укажите путь в настройках.": "FFmpeg not found. Install FFmpeg (https://ffmpeg.org), put it in the «ffmpeg» folder next to the program or set the path in Settings.",
  "FLAC (без потерь)": "FLAC (lossless)",
- "Google Переводчик (онлайн, без ключа)": "Google Translate (online, no key)",
  "Google Переводчик временно ограничил число запросов. Подождите несколько минут и запустите перевод снова — уже переведённые реплики сохранены и будут пропущены.": "Google Translate temporarily limited requests. Wait a few minutes and run the translation again — lines already translated are kept and will be skipped.",
  "Google Переводчик ответил ошибкой {}": "Google Translate returned error {}",
  "MKV (рекомендуется)": "MKV (recommended)",
@@ -113,7 +112,6 @@
  "Без роли": "No role",
  "Без эффекта": "No effect",
  "Белорусский": "Belarusian",
- "Бесплатно, но Google может временно заблокировать перевод после большого числа запросов.": "Free, but Google may temporarily block translation after many requests.",
  "Битрейт:": "Bitrate:",
  "Большой зал": "Big hall",
  "Будет запущено отделение голосов от музыки и звуков (Demucs).\n\nНа видеокарте NVIDIA это занимает несколько минут, на процессоре — примерно столько же, сколько длится видео, или дольше.\nПри первом запуске скачивается модель (~80 МБ). Продолжить?": "Voice separation from music and sound (Demucs) will start.\n\nOn an NVIDIA graphics card it takes a few minutes, on the processor about as long as the video or longer.\nThe model (~80 MB) is downloaded on the first run. Continue?",
@@ -880,5 +878,13 @@
  "слово": "word",
  "слова": "words",
  "слов": "words",
- "Время": "Time"
+ "Время": "Time",
+ "Сторонние компоненты…": "Third-party components…",
+ "Сторонние компоненты": "Third-party components",
+ "Открыть папку лицензий": "Open licenses folder",
+ "Google Cloud Translation (онлайн, нужен ключ)": "Google Cloud Translation (online, key required)",
+ "ключ API из Google Cloud Console": "API key from Google Cloud Console",
+ "Ключ Google:": "Google key:",
+ "Введите ключ Google Cloud Translation API или выберите другой переводчик.": "Enter a Google Cloud Translation API key or choose another translator.",
+ "Официальный сервис Google: 500 000 символов в месяц бесплатно, дальше — по тарифу Google. Ключ: <a href='https://console.cloud.google.com/apis/library/translate.googleapis.com' style='color:{}'>Google Cloud Console</a> → включить Cloud Translation API → «Учётные данные» → «Создать ключ API». Ключ хранится в настройках программы.": "Google's official service: 500,000 characters a month free, then Google's rates. Key: <a href='https://console.cloud.google.com/apis/library/translate.googleapis.com' style='color:{}'>Google Cloud Console</a> → enable Cloud Translation API → “Credentials” → “Create API key”. The key is stored in the program settings."
 }

@@ -1,7 +1,7 @@
 import pytest
 
-from voiceover.core.translate import (GoogleFree, PartialTranslation, RateLimited, _chunks,
-                                      parse_gtx, translate_texts)
+from voiceover.core.translate import (GoogleCloudApi, PartialTranslation, RateLimited, _chunks,
+                                      translate_texts)
 
 
 class Fake:
@@ -56,11 +56,6 @@ def test_chunks():
     assert _chunks(["aaaa", "bbbb", "cc"], limit=9) == [[0], [1, 2]]
 
 
-def test_parse_gtx():
-    data = [[["Привет\n", "Hello\n", None], ["мир", "world", None]], None, "en"]
-    assert parse_gtx(data) == "Привет\nмир"
-
-
 class Resp:
     def __init__(self, code, data=None):
         self.status_code = code
@@ -70,25 +65,44 @@ class Resp:
         return self._data
 
 
-def test_google_waits_on_429_then_succeeds():
-    replies = [Resp(429), Resp(429), Resp(200, [[["да", "yes"]]])]
-    waits, sleeps, calls = [], [], []
+def test_gcloud_batches_waits_and_unescapes():
+    replies = [Resp(429), Resp(200, {"data": {"translations": [
+        {"translatedText": "Rock &amp; roll"}, {"translatedText": "it&#39;s"}]}})]
+    waits, calls = [], []
 
-    def post(url, params, data, timeout):
-        calls.append((params["sl"], params["tl"], data["q"]))
+    def post(url, params, json, timeout):
+        calls.append((url, params, json))
         return replies.pop(0)
 
-    g = GoogleFree("en", "ru", min_interval=0, post=post, sleep=sleeps.append,
-                   on_wait=waits.append)
-    assert g.translate("yes") == "да"
-    assert waits == [5.0, 10.0] and calls[0] == ("en", "ru", "yes")
+    g = GoogleCloudApi("KEY", "auto", "en", post=post, sleep=lambda s: None, on_wait=waits.append)
+    assert g.translate_batch(["Рок-н-ролл", "это"]) == ["Rock & roll", "it's"]
+    assert waits == [5.0]
+    url, params, body = calls[-1]
+    assert url.startswith("https://translation.googleapis.com/") and params == {"key": "KEY"}
+    assert body["q"] == ["Рок-н-ролл", "это"] and body["target"] == "en" and "source" not in body
 
 
-def test_google_gives_up_after_limit():
-    g = GoogleFree("auto", "ru", min_interval=0, max_waits=2, post=lambda *a, **k: Resp(429),
-                   sleep=lambda s: None)
+def test_gcloud_errors():
+    with pytest.raises(RuntimeError, match="ключ"):
+        GoogleCloudApi("  ", "ru", "en", post=lambda *a, **k: None)
+    bad = Resp(400, {"error": {"message": "API key not valid."}})
+    g = GoogleCloudApi("K", "ru", "en", post=lambda *a, **k: bad, sleep=lambda s: None)
+    with pytest.raises(RuntimeError, match="API key not valid"):
+        g.translate("x")
+    g = GoogleCloudApi("K", "ru", "en", post=lambda *a, **k: Resp(429), sleep=lambda s: None)
     with pytest.raises(RateLimited):
         g.translate("x")
+
+
+def test_store_edition_hides_nllb(monkeypatch):
+    from voiceover.core import translate as T
+    monkeypatch.delenv("VO_STORE", raising=False)
+    assert "local" in T.engines()
+    monkeypatch.setenv("VO_STORE", "1")
+    assert T.engines() == ["deepl", "gcloud"]
+    assert T.default_engine("local") == "deepl"           # сохранённый NLLB в Steam-сборке
+    assert T.default_engine("google") == "deepl"          # старая настройка бесплатного Google
+    assert T.default_engine("gcloud") == "gcloud"
 
 
 # ----------------------------------------------------------------- локальный NLLB и DeepL

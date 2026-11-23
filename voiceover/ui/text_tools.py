@@ -18,15 +18,15 @@ if TYPE_CHECKING:
 
 
 def make_translator(settings, src: str, dst: str, on_wait, task: Task):
-    """Переводчик по настройкам: локальная модель, DeepL или Google."""
+    """Переводчик по настройкам: локальная модель, DeepL или Google Cloud."""
     from ..core import translate as tr
-    eng = settings.translate_engine or ("local" if tr.nllb_available()[0] else "google")
+    eng = tr.default_engine(settings.translate_engine)
     if eng == "local":
         return tr.NllbLocal(src, dst, settings.nllb_size,
                             progress=lambda text: task.report(0.0, text))
-    if eng == "deepl":
-        return tr.DeepLApi(settings.deepl_key, src, dst, on_wait=on_wait)
-    return tr.google_translator(src, dst, on_wait=on_wait, cancel=task.is_cancelled)
+    if eng == "gcloud":
+        return tr.GoogleCloudApi(settings.gcloud_key, src, dst, on_wait=on_wait)
+    return tr.DeepLApi(settings.deepl_key, src, dst, on_wait=on_wait)
 
 
 def translate_lines(win: "MainWindow", lines: Optional[list[Line]] = None) -> None:

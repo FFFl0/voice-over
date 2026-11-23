@@ -822,13 +822,14 @@ class TranslateDialog(QDialog):
         self.skip_done = QCheckBox("Пропускать уже переведённые реплики")
         self.skip_done.setChecked(True)
         self.skip_done.setToolTip("Выключите, чтобы перевести заново — с сохранённого оригинала")
-        from ..core.translate import NLLB_SIZES, nllb_available
+        from ..core.translate import NLLB_SIZES, default_engine, engines
         self.engine = QComboBox()
-        self.engine.addItem("Локально, без интернета (NLLB-200)", "local")
-        self.engine.addItem("DeepL (онлайн, нужен бесплатный ключ)", "deepl")
-        self.engine.addItem("Google Переводчик (онлайн, без ключа)", "google")
-        eng = s.translate_engine or ("local" if nllb_available()[0] else "google")
-        self.engine.setCurrentIndex(max(0, self.engine.findData(eng)))
+        titles = {"local": "Локально, без интернета (NLLB-200)",
+                  "deepl": "DeepL (онлайн, нужен бесплатный ключ)",
+                  "gcloud": "Google Cloud Translation (онлайн, нужен ключ)"}
+        for code in engines():
+            self.engine.addItem(titles[code], code)
+        self.engine.setCurrentIndex(max(0, self.engine.findData(default_engine(s.translate_engine))))
         self.size = QComboBox()
         for code, title in NLLB_SIZES:
             self.size.addItem(f"{code} — {title}", code)
@@ -836,6 +837,9 @@ class TranslateDialog(QDialog):
         self.key = QLineEdit(s.deepl_key)
         self.key.setPlaceholderText("ключ DeepL API (deepl.com/pro-api, тариф Free)")
         self.key.setEchoMode(QLineEdit.Password)
+        self.gkey = QLineEdit(s.gcloud_key)
+        self.gkey.setPlaceholderText("ключ API из Google Cloud Console")
+        self.gkey.setEchoMode(QLineEdit.Password)
         self.engine_note = QLabel()
         self.engine_note.setWordWrap(True)
         self.engine_note.setOpenExternalLinks(True)
@@ -849,6 +853,8 @@ class TranslateDialog(QDialog):
         f.addRow(self._size_row, self.size)
         self._key_row = QLabel("Ключ DeepL:")
         f.addRow(self._key_row, self.key)
+        self._gkey_row = QLabel("Ключ Google:")
+        f.addRow(self._gkey_row, self.gkey)
         f.addRow("", self.engine_note)
         f.addRow("С языка:", self.source)
         f.addRow("На язык:", self.target)
@@ -875,6 +881,8 @@ class TranslateDialog(QDialog):
             w.setVisible(eng == "local")
         for w in (self._key_row, self.key):
             w.setVisible(eng == "deepl")
+        for w in (self._gkey_row, self.gkey):
+            w.setVisible(eng == "gcloud")
         th = theme.current()
         color = th.muted
         if eng == "local":
@@ -891,8 +899,11 @@ class TranslateDialog(QDialog):
                     f"<a href='https://www.deepl.com/pro-api' style='color:{th.accent}'>deepl.com/pro-api</a> "
                     "(тариф «DeepL API Free»), затем «Аккаунт → Ключи API». Ключ хранится в настройках программы.")
         else:
-            text = ("Бесплатно, но Google может временно заблокировать перевод после "
-                    "большого числа запросов.")
+            text = ("Официальный сервис Google: 500 000 символов в месяц бесплатно, дальше — по "
+                    "тарифу Google. Ключ: "
+                    f"<a href='https://console.cloud.google.com/apis/library/translate.googleapis.com' "
+                    f"style='color:{th.accent}'>Google Cloud Console</a> → включить Cloud Translation "
+                    "API → «Учётные данные» → «Создать ключ API». Ключ хранится в настройках программы.")
         self.engine_note.setText(text)
         self.engine_note.setStyleSheet(f"color:{color}")
 
@@ -908,11 +919,16 @@ class TranslateDialog(QDialog):
         if eng == "deepl" and not self.key.text().strip():
             QMessageBox.warning(self, "Перевод", "Введите ключ DeepL API или выберите другой переводчик.")
             return
+        if eng == "gcloud" and not self.gkey.text().strip():
+            QMessageBox.warning(self, "Перевод", "Введите ключ Google Cloud Translation API "
+                                                 "или выберите другой переводчик.")
+            return
         self.s.translate_source = self.source.currentData()
         self.s.translate_target = self.target.currentData()
         self.s.translate_engine = eng
         self.s.nllb_size = self.size.currentData()
         self.s.deepl_key = self.key.text().strip()
+        self.s.gcloud_key = self.gkey.text().strip()
         self.s.save()
         self.accept()
 

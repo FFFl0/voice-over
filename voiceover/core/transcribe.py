@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
@@ -33,7 +34,21 @@ _HALLUCINATIONS = re.compile(
     r"thanks for watching|subscribe|ご視聴ありがとうございました|字幕)", re.I)
 
 
+def _av_stub() -> None:
+    """faster-whisper импортирует PyAV (`av`) только чтобы читать файлы, а программа передаёт
+    ему готовый массив звука. В сборке для магазинов `av` не кладётся: его колёса содержат
+    FFmpeg с x264/x265 (GPL). Тогда вместо него — пустой модуль, чтобы импорт прошёл."""
+    if "av" in sys.modules and sys.modules["av"] is not None:
+        return
+    try:
+        import av  # noqa: F401
+    except ImportError:
+        import types
+        sys.modules["av"] = types.ModuleType("av")
+
+
 def whisper_available() -> tuple[bool, str]:
+    _av_stub()
     try:
         import faster_whisper  # noqa: F401
     except ImportError:
@@ -125,6 +140,7 @@ def segments_to_lines(segments: Iterable[Segment], max_len: float = 7.0,
 
 
 def _load_model(model_name: str, device: str, download_root: str):
+    _av_stub()
     from faster_whisper import WhisperModel
     from .gpu import cuda_usable
     if device == "cuda" or (device == "auto" and cuda_usable()):

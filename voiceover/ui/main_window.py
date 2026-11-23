@@ -2368,12 +2368,46 @@ class MainWindow(QMainWindow):
             self._fill_char_combos()
 
     def about(self):
-        QMessageBox.about(self, APP_NAME,
-                          f"<b>{APP_NAME}</b> {__version__}<br>"
-                          "Многоголосая озвучка фильмов, сериалов, мультфильмов и аниме.<br><br>"
-                          "Распознавание: Whisper (faster-whisper). Отделение голосов: Demucs. "
-                          "Голоса: WeSpeaker. Орфография: словари LibreOffice (spylls). "
-                          "Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
+        box = QMessageBox(self)
+        box.setWindowTitle(APP_NAME)
+        box.setIconPixmap(self.windowIcon().pixmap(64, 64))
+        box.setText(f"<b>{APP_NAME}</b> {__version__}<br>"
+                    "Многоголосая озвучка фильмов, сериалов, мультфильмов и аниме.<br><br>"
+                    "Распознавание: Whisper (faster-whisper). Отделение голосов: Demucs. "
+                    "Голоса: WeSpeaker. Орфография: словари LibreOffice (spylls). "
+                    "Видео/звук: FFmpeg. Интерфейс: Qt (PySide6).")
+        b_third = box.addButton("Сторонние компоненты…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+        if box.clickedButton() is b_third:
+            self.show_third_party()
+
+    def show_third_party(self):
+        """Список сторонних компонентов и их лицензий (licenses/THIRD_PARTY.md)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTextBrowser
+        from ..edition import licenses_dir
+        folder = licenses_dir()
+        try:
+            text = (folder / "THIRD_PARTY.md").read_text(encoding="utf-8")
+        except OSError:
+            text = "licenses/THIRD_PARTY.md not found"
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Сторонние компоненты")
+        dlg.resize(820, 600)
+        view = QTextBrowser()
+        view.setOpenExternalLinks(True)
+        view.setMarkdown(text)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        b_open = bb.addButton("Открыть папку лицензий", QDialogButtonBox.ActionRole)
+        b_open.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))))
+        b_open.setEnabled(folder.is_dir())
+        bb.rejected.connect(dlg.reject)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(view)
+        lay.addWidget(bb)
+        dlg.exec()
 
     def help(self):
         QMessageBox.information(self, "Как пользоваться", HELP_TEXT)
