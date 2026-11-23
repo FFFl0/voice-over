@@ -1,0 +1,58 @@
+# Выпуск в Steam
+
+## 1. Сборка
+
+```
+build.bat steam
+```
+
+Это полная сборка (с Demucs) для магазина:
+
+- FFmpeg — LGPL-сборка, её скачивает `tools/fetch_ffmpeg.py` в папку `ffmpeg/`;
+- нет imageio-ffmpeg (GPL-сборка FFmpeg), PyAV (x264/x265, GPL) и локального перевода
+  NLLB-200 (лицензия CC-BY-NC);
+- лицензии всех вошедших пакетов — в `licenses/packages/`, список — в `licenses/THIRD_PARTY.md`
+  (в программе: *Справка → О программе → Сторонние компоненты*).
+
+Результат — `dist\VoiceOverStudio\`. Перед загрузкой запустите его на **чистой** Windows 10/11
+(без Python и FFmpeg): новый проект, распознавание, отделение голосов, запись с микрофона,
+экспорт видео с логотипом (проверка кодировщика H.264 без x264).
+
+## 2. Настройки в Steamworks (один раз)
+
+1. *Приложение → Установка → Общие*: папка установки `VoiceOverStudio`, параметр запуска —
+   исполняемый файл `VoiceOverStudio.exe`, ОС — Windows, архитектура — 64-bit.
+2. *SteamPipe → Депо*: одно депо для Windows (номер депо понадобится ниже).
+3. *Установка → Распространяемые компоненты*: ничего не нужно — PyInstaller кладёт среду
+   выполнения Visual C++ в сборку.
+4. Опубликуйте изменения (*Опубликовать → Подготовить к публикации*).
+
+## 3. Загрузка сборки
+
+Нужен Steamworks SDK (partner.steamgames.com → *Steamworks SDK*): в нём
+`sdk\tools\ContentBuilder\builder\steamcmd.exe`.
+
+```
+set STEAMCMD=C:\steamworks_sdk\tools\ContentBuilder\builder\steamcmd.exe
+steam\upload.bat <APP_ID> <DEPOT_ID> <логин Steam>
+```
+
+`upload.bat` создаёт `build\steam\app_build_<APP_ID>.vdf` и `depot_build_<DEPOT_ID>.vdf`
+(`steam/make_vdf.py`) и загружает папку `dist\VoiceOverStudio`. При первом входе steamcmd
+спросит код Steam Guard. Сборка сразу не выпускается: *SteamPipe → Сборки* → выбрать сборку →
+ветка `default` (или сначала закрытая ветка для бета-тестеров).
+
+Размер: с PyTorch (CUDA) сборка весит несколько гигабайт — Steam это допускает, обновления
+скачиваются частями (только изменившиеся файлы).
+
+## 4. Перед релизом — проверить самому
+
+- [ ] Лицензия модели **WeSpeaker voxceleb-resnet34-LM** (карточка модели на Hugging Face)
+      и словарей **LibreOffice** (README в каждой папке словаря) — подходят ли для платного продукта.
+- [ ] **FFmpeg**: `ffmpeg/SOURCE.txt` содержит письменное предложение выдать исходники
+      сборки по запросу — оно от вашего имени; сохраните архив исходников FFmpeg той версии,
+      что в сборке (ссылка в том же файле), на три года.
+- [ ] Свой лицензионный договор (EULA): *Steamworks → Приложение → Юридическое → EULA*.
+- [ ] Страница магазина: тексты — `steam/store_page.md`, изображения — по шаблонам Steamworks.
+- [ ] Программа не пишет в папку установки (Steam ставит её в `steamapps\common`): настройки,
+      модели и словари — в `%APPDATA%\VoiceOverStudio`, проекты — там, где их сохранил пользователь.

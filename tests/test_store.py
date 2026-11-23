@@ -42,3 +42,21 @@ def test_whisper_imports_without_pyav(monkeypatch):
     import importlib.util
     if importlib.util.find_spec("faster_whisper") is not None:
         assert ok and not hasattr(sys.modules["av"], "open")
+
+
+def test_steam_vdf(tmp_path, monkeypatch):
+    sys.path.insert(0, "steam")
+    try:
+        import make_vdf
+    finally:
+        sys.path.remove("steam")
+    monkeypatch.setattr(make_vdf, "OUT", tmp_path)
+    app = make_vdf.main(["make_vdf.py", "1234560", "1234561", 'v1 "beta"']).read_text()
+    depot = (tmp_path / "depot_build_1234561.vdf").read_text()
+    assert '"AppID" "1234560"' in app and '"1234561" "depot_build_1234561.vdf"' in app
+    assert '"SetLive" ""' in app and "\\" not in app and "\"v1 'beta'\"" in app
+    assert '"DepotID" "1234561"' in depot and '"Recursive" "1"' in depot
+    assert app.count("{") == app.count("}") and depot.count("{") == depot.count("}")
+    import pytest
+    with pytest.raises(SystemExit):
+        make_vdf.main(["make_vdf.py", "abc", "1"])
